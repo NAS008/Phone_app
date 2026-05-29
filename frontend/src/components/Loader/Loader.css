@@ -124,8 +124,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 188px;
-  padding: 20px 20px 4px;
+  min-height: 148px;
+  padding: 24px 20px;
   background:
     radial-gradient(circle at center, rgba(255, 255, 255, 0.08), transparent 52%),
     linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
@@ -150,7 +150,7 @@
   position: relative;
   z-index: 1;
   display: block;
-  width: min(248px, 100%);
+  width: min(150px, 65%);
   height: auto;
 }
 
@@ -311,8 +311,8 @@
 
 @media (max-width: 900px) {
   .claim-visual {
-    min-height: 176px;
-    padding: 18px 18px 4px;
+    min-height: 132px;
+    padding: 20px 18px;
   }
 
   .claim-panel {
@@ -330,8 +330,8 @@
   }
 
   .claim-visual {
-    min-height: 152px;
-    padding: 14px 12px 2px;
+    min-height: 110px;
+    padding: 18px 12px;
   }
 
   .claim-visual::after {
@@ -344,7 +344,7 @@
   }
 
   .claim-logo-image {
-    width: min(220px, 100%);
+    width: min(130px, 60%);
   }
 
   .claim-panel {

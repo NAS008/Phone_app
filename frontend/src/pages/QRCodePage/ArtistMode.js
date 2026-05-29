@@ -342,7 +342,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [audioWidgetPhase, setAudioWidgetPhase] = useState("idle");
   const [audioWidgetText, setAudioWidgetText] = useState("");
@@ -975,7 +974,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
     setPrompt("");
     clearDraftImage();
     resetAudioWidget();
-    setIsComposerOpen(false);
     setIsAttachmentMenuOpen(false);
   }, [clearDraftImage, nickname, replayWelcomeFeed, resetAudioWidget, sessionId]);
 
@@ -995,6 +993,13 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [feed]);
+
+  useEffect(() => {
+    const el = composerTextareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [prompt]);
 
 
   useEffect(() => {
@@ -1162,24 +1167,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   }, [isAttachmentMenuOpen]);
 
   const canSend = prompt.trim().length > 0 || Boolean(draftImage);
-  const isComposerLockedOpen =
-    canSend || isRecording || isSubmitting || audioWidgetPhase !== "idle";
-
-  useEffect(() => {
-    if (isComposerLockedOpen) {
-      setIsComposerOpen(true);
-    }
-  }, [isComposerLockedOpen]);
-
-  useEffect(() => {
-    if (!isComposerOpen) return undefined;
-
-    const frameId = window.requestAnimationFrame(() => {
-      composerTextareaRef.current?.focus();
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [isComposerOpen]);
 
   const audioWidgetLabel = useMemo(() => {
     if (audioWidgetPhase === "recording") return "Listening";
@@ -1224,8 +1211,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         <div className="assistant-copy">
           <h1>{nickname ? `Hello ${nickname}` : "Hello"}</h1>
           <p>
-            Guide the next artwork with a short prompt, an image, a fresh photo,
-            or a voice note.
+            Guide the next artwork with an idea, image or voice note
           </p>
         </div>
       </header>
@@ -1478,193 +1464,151 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         </section>
       )}
 
-      <section className={`composer-panel ${isComposerOpen ? "open" : "collapsed"}`}>
-        {!isComposerOpen ? (
-          <button
-            type="button"
-            className="composer-launch-button"
-            onClick={() => setIsComposerOpen(true)}
-            disabled={isSubmitting}
-          >
-            <span className="composer-launch-orb" aria-hidden="true" />
-            <span className="composer-launch-copy">
-              <span className="composer-launch-title">Talk with TFNCA</span>
-              <span className="composer-launch-subtitle">
-                Prompt, gallery, photo, or voice note
-              </span>
-            </span>
-          </button>
-        ) : (
-          <>
-            <div className="composer-toolbar">
-              <button
-                type="button"
-                className="composer-toolbar-pill"
-                onClick={() => composerTextareaRef.current?.focus()}
+      <section className="composer-panel open">
+        {audioWidgetPhase !== "idle" && (
+          <div className={`audio-widget ${audioWidgetPhase}`}>
+            <div className={`audio-widget__orb ${audioWidgetPhase}`} aria-hidden="true" />
+            <div className="audio-widget__copy">
+              <span className="audio-widget__eyebrow">{audioWidgetLabel}</span>
+              <p
+                className={`audio-widget__text ${
+                  audioWidgetPhase === "reveal" && audioWidgetDisplayText !== audioWidgetText
+                    ? "typing"
+                    : ""
+                }`}
               >
-                <span className="composer-toolbar-orb" aria-hidden="true" />
-                <span>Talk with TFNCA</span>
-              </button>
-
-              {!isComposerLockedOpen && (
-                <button
-                  type="button"
-                  className="composer-collapse-button"
-                  onClick={() => {
-                    setIsAttachmentMenuOpen(false);
-                    setIsComposerOpen(false);
-                  }}
-                >
-                  Close
-                </button>
+                {audioWidgetCopy}
+              </p>
+              {audioWidgetPhase === "processing" && (
+                <div className="audio-widget__dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
               )}
             </div>
+          </div>
+        )}
 
-            {audioWidgetPhase !== "idle" && (
-              <div className={`audio-widget ${audioWidgetPhase}`}>
-                <div className={`audio-widget__orb ${audioWidgetPhase}`} aria-hidden="true" />
-                <div className="audio-widget__copy">
-                  <span className="audio-widget__eyebrow">{audioWidgetLabel}</span>
-                  <p
-                    className={`audio-widget__text ${
-                      audioWidgetPhase === "reveal" && audioWidgetDisplayText !== audioWidgetText
-                        ? "typing"
-                        : ""
-                    }`}
-                  >
-                    {audioWidgetCopy}
-                  </p>
-                  {audioWidgetPhase === "processing" && (
-                    <div className="audio-widget__dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+        {draftImage && (
+          <div className="composer-status attachment">
+            <span>{draftLabel || "Image attached"}</span>
+            <button type="button" onClick={clearDraftImage} aria-label="Remove attached image">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        )}
 
-            {draftImage && (
-              <div className="composer-status attachment">
-                <span>{draftLabel || "Image attached"}</span>
-                <button type="button" onClick={clearDraftImage} aria-label="Remove attached image">
-                  <span aria-hidden="true">×</span>
-                </button>
-              </div>
-            )}
+        <textarea
+          ref={composerTextareaRef}
+          className="composer-textarea"
+          placeholder=""
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          maxLength={300}
+          disabled={isSubmitting}
+          rows={1}
+        />
 
-            <textarea
-              ref={composerTextareaRef}
-              className="composer-textarea"
-              placeholder="Describe the next image, mood, texture, subject, or idea..."
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              maxLength={300}
-              disabled={isSubmitting}
-            />
+        <div className="composer-actions">
+          <div className="action-cluster">
+            <div className="attachment-menu" ref={attachmentMenuRef}>
+              <button
+                type="button"
+                className="icon-button action-button"
+                onClick={() => setIsAttachmentMenuOpen((open) => !open)}
+                disabled={isSubmitting || isRecording}
+                aria-label="Open attachment options"
+                aria-expanded={isAttachmentMenuOpen}
+              >
+                <PlusIcon />
+              </button>
 
-            <div className="composer-actions">
-              <div className="action-cluster">
-                <div className="attachment-menu" ref={attachmentMenuRef}>
+              {isAttachmentMenuOpen && (
+                <div className="attachment-popover">
                   <button
                     type="button"
-                    className="icon-button action-button"
-                    onClick={() => setIsAttachmentMenuOpen((open) => !open)}
-                    disabled={isSubmitting || isRecording}
-                    aria-label="Open attachment options"
-                    aria-expanded={isAttachmentMenuOpen}
+                    className="attachment-popover__item"
+                    onClick={() => {
+                      setIsAttachmentMenuOpen(false);
+                      cameraInputRef.current?.click();
+                    }}
                   >
-                    <PlusIcon />
+                    <CameraIcon />
+                    <span>Take Photo</span>
                   </button>
-
-                  {isAttachmentMenuOpen && (
-                    <div className="attachment-popover">
-                      <button
-                        type="button"
-                        className="attachment-popover__item"
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          cameraInputRef.current?.click();
-                        }}
-                      >
-                        <CameraIcon />
-                        <span>Take Photo</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="attachment-popover__item"
-                        onClick={() => {
-                          setIsAttachmentMenuOpen(false);
-                          galleryInputRef.current?.click();
-                        }}
-                      >
-                        <GalleryIcon />
-                        <span>Gallery</span>
-                      </button>
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    className="attachment-popover__item"
+                    onClick={() => {
+                      setIsAttachmentMenuOpen(false);
+                      galleryInputRef.current?.click();
+                    }}
+                  >
+                    <GalleryIcon />
+                    <span>Gallery</span>
+                  </button>
                 </div>
-
-                <button
-                  type="button"
-                  className={`icon-button action-button ${isGyroEnabled ? "toggled" : ""}`}
-                  onClick={handleGyroToggle}
-                  disabled={isSubmitting}
-                  aria-label={isGyroEnabled ? "Disable gyroscope" : "Enable gyroscope"}
-                  aria-pressed={isGyroEnabled}
-                  title={isGyroEnabled ? "Gyroscope on" : "Gyroscope off"}
-                >
-                  <GyroIcon />
-                </button>
-              </div>
-
-              <button
-                type="button"
-                className={`icon-button action-button${isLikePulsing ? " like-active" : ""}`}
-                onClick={handleShareRequest}
-                disabled={isSubmitting}
-                aria-label="Like — request image share"
-              >
-                <HeartIcon />
-              </button>
-
-              {isAdmin && (
-                <button
-                  type="button"
-                  className={`icon-button action-button${isSettingsPanelOpen ? " toggled" : ""}`}
-                  onClick={() => setIsSettingsPanelOpen((open) => !open)}
-                  aria-label="Open settings"
-                  aria-expanded={isSettingsPanelOpen}
-                >
-                  <SettingsIcon />
-                </button>
               )}
-
-              <div className="action-cluster action-cluster--right">
-                <button
-                  type="button"
-                  className={`icon-button action-button ${isRecording ? "recording" : ""}`}
-                  onClick={handleAudioAction}
-                  disabled={isSubmitting}
-                  aria-label={isRecording ? "Stop audio recording" : "Record voice"}
-                >
-                  <MicIcon />
-                </button>
-
-                <button
-                  type="button"
-                  className="icon-button send-button"
-                  onClick={handleSubmit}
-                  disabled={!canSend || isSubmitting || isRecording}
-                  aria-label="Send message"
-                >
-                  <SendIcon />
-                </button>
-              </div>
             </div>
-          </>
-        )}
+
+            <button
+              type="button"
+              className={`icon-button action-button ${isGyroEnabled ? "toggled" : ""}`}
+              onClick={handleGyroToggle}
+              disabled={isSubmitting}
+              aria-label={isGyroEnabled ? "Disable gyroscope" : "Enable gyroscope"}
+              aria-pressed={isGyroEnabled}
+              title={isGyroEnabled ? "Gyroscope on" : "Gyroscope off"}
+            >
+              <GyroIcon />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className={`icon-button action-button${isLikePulsing ? " like-active" : ""}`}
+            onClick={handleShareRequest}
+            disabled={isSubmitting}
+            aria-label="Like — request image share"
+          >
+            <HeartIcon />
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              className={`icon-button action-button${isSettingsPanelOpen ? " toggled" : ""}`}
+              onClick={() => setIsSettingsPanelOpen((open) => !open)}
+              aria-label="Open settings"
+              aria-expanded={isSettingsPanelOpen}
+            >
+              <SettingsIcon />
+            </button>
+          )}
+
+          <div className="action-cluster action-cluster--right">
+            <button
+              type="button"
+              className={`icon-button action-button ${isRecording ? "recording" : ""}`}
+              onClick={handleAudioAction}
+              disabled={isSubmitting}
+              aria-label={isRecording ? "Stop audio recording" : "Record voice"}
+            >
+              <MicIcon />
+            </button>
+
+            <button
+              type="button"
+              className="icon-button send-button"
+              onClick={handleSubmit}
+              disabled={!canSend || isSubmitting || isRecording}
+              aria-label="Send message"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </div>
 
         <input
           ref={cameraInputRef}

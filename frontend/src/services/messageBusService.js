@@ -2,7 +2,7 @@ import { encode } from "@msgpack/msgpack";
 
 class MessageBusService {
   constructor() {
-    this.apiUrl = process.env.REACT_APP_API_URL || "https://api.tfnca.com";
+    this.apiUrl = process.env.REACT_APP_API_URL || "https://phoneapp-production-48e4.up.railway.app";
   }
 
   // ── Low-level helpers ──────────────────────────────────────────────────────

@@ -409,7 +409,8 @@ class AIMessageListener(threading.Thread):
     def stop(self):
         self.stopped.set()
 
-def run_backend(host="0.0.0.0", port=8888):
+def run_backend(host="0.0.0.0", port=None):
+    port = port or int(__import__('os').environ.get('PORT', 8888))
     config = Config()
 
     bus = Bus(

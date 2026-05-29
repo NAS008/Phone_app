@@ -502,28 +502,24 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
 
   const handleDownloadImage = useCallback(
     async (url, filename = "noncarbon-artwork.jpg") => {
-      // For data-URLs (base64 images from the poll) use them directly;
-      // for server URLs apply the download query param.
-      const downloadUrl = url.startsWith("data:")
-        ? url
-        : buildDownloadUrl(url, filename);
-
       try {
         if (shouldPreferNativeShare()) {
+          // Convert to File so iOS share sheet shows "Save to Photos"
           try {
-            await navigator.share({
-              url: url.startsWith("data:") ? undefined : url,
-              title: "NonCarbon artwork",
-              text: "Generated artwork from TFNCA",
-            });
-            return;
-          } catch (shareError) {
-            if (shareError?.name === "AbortError") {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              await navigator.share({ files: [file], title: "NonCarbon artwork" });
               return;
             }
+          } catch (shareError) {
+            if (shareError?.name === "AbortError") return;
           }
         }
 
+        // Desktop: trigger download via hidden link
+        const downloadUrl = url.startsWith("data:") ? url : buildDownloadUrl(url, filename);
         const link = document.createElement("a");
         link.href = downloadUrl;
         link.download = filename;
@@ -532,7 +528,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         link.click();
         document.body.removeChild(link);
       } catch (error) {
-        window.open(downloadUrl, "_blank", "noopener,noreferrer");
+        window.open(url, "_blank", "noopener,noreferrer");
         flashNotice("success", "Opened artwork download.");
       }
     },

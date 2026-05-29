@@ -1,0 +1,357 @@
+.container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: black;
+  z-index: 50;
+  opacity: 1;
+  transition: opacity 1s ease-out;
+}
+
+.container.fade-out {
+  opacity: 0;
+}
+
+.rectangle-animation-area {
+  position: relative;
+  border: 1px solid transparent; /* Ensures the container maintains size */
+  overflow: hidden; /* Keep text inside the box */
+}
+
+.rectangle-pixel {
+  position: absolute;
+  background-color: white;
+  opacity: 0;
+  animation: appear 0.2s forwards;
+  /* Apply a transform to make lines appear thinner */
+  transform-origin: center;
+  /* No scale transform here - we'll use a smaller pixel size instead */
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.text-line {
+  position: absolute;
+  color: white;
+  text-align: left;
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: bold;
+  opacity: 0;
+  /* Slide up from below while fading in */
+  transform: translateY(100%);
+  animation: slideUpFade 0.4s forwards;
+  letter-spacing: -1px;
+  text-transform: uppercase;
+  line-height: 0.85; /* Tight line height for compact appearance */
+  white-space: nowrap;
+  overflow: hidden; /* Keep text inside its box */
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.text-complete {
+  /* No animation - just static when complete */
+}
+
+/* Media queries for responsive design */
+@media (max-width: 768px) {
+  .rectangle-animation-area {
+    transform: scale(0.85);
+  }
+}
+
+@media (max-width: 480px) {
+  .rectangle-animation-area {
+    transform: scale(0.7);
+  }
+}
+
+/* ========================================== */
+/* NEW STYLES FOR CLAIM MODE                 */
+/* ========================================== */
+.container.claim-mode {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, #020202 0%, #0a0a0a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 20px 18px;
+}
+
+.claim-shell {
+  width: min(430px, 100%);
+}
+
+.claim-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 26px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(8, 8, 8, 0.92);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.claim-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 188px;
+  padding: 20px 20px 4px;
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.08), transparent 52%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+}
+
+.claim-visual::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  pointer-events: none;
+}
+
+.claim-logo-stage {
+  z-index: 1;
+  transform: scale(0.84);
+  transform-origin: center;
+}
+
+.claim-logo-image {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: min(248px, 100%);
+  height: auto;
+}
+
+.claim-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 14px 18px 18px;
+  border-left: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
+    rgba(10, 10, 10, 0.96);
+}
+
+.claim-copy {
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.claim-eyebrow {
+  margin: 0 0 16px;
+  color: #9e9e9e;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.claim-title {
+  color: #fff;
+  font-size: clamp(26px, 3vw, 34px);
+  margin: 0;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 0.94;
+}
+
+.claim-subtitle {
+  color: #a8a8a8;
+  font-size: 15px;
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.claim-form {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.claim-label {
+  color: #d8d8d8;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.claim-input {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  padding: 13px 15px;
+  font-size: 15px;
+  border-radius: 14px;
+  outline: none;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background-color 0.25s ease;
+}
+
+.claim-input:focus {
+  border-color: rgba(255, 255, 255, 0.34);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06);
+}
+
+.claim-input::placeholder {
+  color: #6e6e6e;
+}
+
+.claim-session-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.015);
+  text-align: center;
+}
+
+.claim-session-label {
+  color: #8e8e8e;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.claim-button {
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ececec 100%);
+  color: #000;
+  border: none;
+  padding: 13px 16px;
+  font-size: 15px;
+  border-radius: 14px;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.claim-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(255, 255, 255, 0.12);
+}
+
+.claim-button:disabled {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.claim-error {
+  color: #ff7d7d;
+  font-size: 13px;
+  margin-top: -4px;
+}
+
+.claim-session-id {
+  color: #fff;
+  font-size: 12px;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+}
+
+.claim-scan-msg {
+  color: #a8a8a8;
+  font-size: 14px;
+  text-align: center;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .claim-visual {
+    min-height: 176px;
+    padding: 18px 18px 4px;
+  }
+
+  .claim-panel {
+    padding: 14px 18px 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  .container.claim-mode {
+    padding: 16px 12px;
+  }
+
+  .claim-card {
+    border-radius: 22px;
+  }
+
+  .claim-visual {
+    min-height: 152px;
+    padding: 14px 12px 2px;
+  }
+
+  .claim-visual::after {
+    inset: 10px;
+    border-radius: 16px;
+  }
+
+  .claim-logo-stage {
+    transform: scale(0.72);
+  }
+
+  .claim-logo-image {
+    width: min(220px, 100%);
+  }
+
+  .claim-panel {
+    padding: 12px 14px 16px;
+  }
+
+  .claim-title {
+    font-size: 24px;
+  }
+}

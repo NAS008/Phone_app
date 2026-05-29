@@ -1,0 +1,102 @@
+/* Main container styles */
+.app-container {
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  /* Removed overflow: hidden - this was preventing scrolling */
+
+  /* Add padding at the bottom to prevent content from being hidden by the player */
+
+  /* removed because spotify player isnt being used */
+  /* padding-bottom: 90px; */
+  min-height: 100vh;
+}
+
+/* Conditionally apply styles based on route */
+.app-container.home-page {
+  overflow: hidden; /* Only hide overflow on home page */
+}
+
+/* Fullscreen main content */
+.main-content {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Navigation container */
+.navigation {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 0;
+  padding: 0 20px;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+/* Left navigation (Agents logo) */
+.nav-left {
+  max-width: 180px;
+}
+
+/* Right navigation logo group */
+.nav-right {
+  display: flex;
+  gap: 20px;
+}
+
+.nav-right .logo {
+  max-width: 120px;
+  height: auto;
+  transition: transform 0.3s ease;
+}
+
+.nav-right .logo:hover {
+  transform: scale(1.05);
+}
+
+/* Media queries for responsive design */
+@media (max-width: 768px) {
+  .navigation {
+    flex-direction: column;
+    align-items: center;
+    top: 10px;
+    gap: 15px;
+  }
+
+  .nav-left {
+    margin-bottom: 10px;
+  }
+
+  .nav-right {
+    gap: 10px;
+  }
+
+  .nav-right .logo {
+    max-width: 100px;
+  }
+}
+
+@media (max-width: 480px) {
+  .navigation {
+    padding: 0 10px;
+    top: 5px;
+  }
+
+  .nav-left {
+    max-width: 140px;
+    margin-bottom: 5px;
+  }
+
+  .nav-right {
+    gap: 5px;
+  }
+
+  .nav-right .logo {
+    max-width: 80px;
+  }
+}

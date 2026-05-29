@@ -1,0 +1,383 @@
+# # # # # # #
+# The       #
+# First     #
+# NonCarbon #
+# Artist    #
+# # # # # # #
+
+# PC App uses a GPU PC to run OpticalFlow, Simulator and RayTracing on site
+# Has no UI, just a borderless display window
+# Input: Receives images from the bus to update Simulator gradients and xyz_goal
+# Interpolates with OpticalFlow to get smooth color transitions between images while updates particles rgb
+# Does particles xyz simulation (heightmap, fluid, ui, constraints, collision, boundaries)
+# Output: Sends the current rendered frame when a like is received
+# ----------------------------------------------------------------
+# ✓ Update sim gradients and xyz_goal
+# ✓ OpticalFlow interpolation, update rgb
+# ✓ Simulation update
+# ✗ Add FLIP fluid
+# ✗ Add collisions
+# ✗ Add world boundaries
+# ✗ Add slime simulation
+# ✗ Fix gradient wind
+# ✗ Fix noise on ellipsoid
+# ✗ Fix detail on prisms with multiple intersect triangles
+# ✗ Fix insert triangle to reduce the number of hit cells
+
+import cv2
+import numpy as np
+import asyncio
+import ctypes
+import time
+from collections import deque
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
+from config import Config
+from session import Session
+from bus import Bus
+from ray import RayTracer
+from sd35 import OpticalFlow
+from sim import Simulator
+from ui import Camera
+ctypes.windll.user32.SetProcessDPIAware()
+
+def get_first_part(parts, kind):
+    for part in parts or []:
+        if part.get("kind") == kind:
+            return part
+    return None
+
+def get_image_bytes_from_parts(parts):
+    part = get_first_part(parts, "image")
+    if not part:
+        return None
+    return part.get("data")
+
+def get_image_bytes(image_bgr, image_size=0, quality=85):
+    if image_size > 0:
+        h, w = image_bgr.shape[:2]
+
+        if h <= w:
+            new_h = image_size
+            new_w = int(round(w * (image_size / h)))
+        else:
+            new_w = image_size
+            new_h = int(round(h * (image_size / w)))
+        resized = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        ok, buffer = cv2.imencode('.jpg', resized, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    else:
+        ok, buffer = cv2.imencode('.jpg', image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        
+    if not ok:
+        raise ValueError('✗ PC: JPEG encoding failed')
+    return buffer.tobytes()
+
+def overlay(frame, overlay_img, proportion=16, alignment="center"):
+    out = frame.copy()
+
+    H, W = out.shape[:2]
+    h, w = overlay_img.shape[:2]
+    ar = float(w) / h
+    h = H // proportion
+    if h < 100:
+        h = 100
+    w = int(h * ar)
+
+    overlay_img = cv2.resize(overlay_img, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    if alignment == "center":
+        x0 = (W - w) // 2
+        y0 = (H - h) // 2
+    elif alignment == "bottom center":
+        x0 = (W - w) // 2
+        y0 = H - h - h // 2
+    elif alignment == "bottom left":
+        x0 = w // 4
+        y0 = H - h - h // 2
+    elif alignment == "bottom right":
+        x0 = W - w - w // 2
+        y0 = H - h - h // 2
+    elif alignment == "top center":
+        x0 = (W - w) // 2
+        y0 = h // 2
+    elif alignment == "top left":
+        x0 = w // 2
+        y0 = h // 2
+    elif alignment == "top right":
+        x0 = W - w - w // 2
+        y0 = h // 2
+    else:
+        raise ValueError(f"Unknown alignment: {alignment}")
+
+    region = out[y0:y0+h, x0:x0+w].astype(np.float32)
+    overlay_bgr = overlay_img.astype(np.float32)
+
+    # Compute luminance in [0, 255]
+    b = overlay_bgr[:, :, 0]
+    g = overlay_bgr[:, :, 1]
+    r = overlay_bgr[:, :, 2]
+    luminance = 0.114 * b + 0.587 * g + 0.299 * r  # BGR order
+
+    # Normalize to [0, 1] and make it (h, w, 1)
+    alpha = (luminance / 255.0)[..., None].astype(np.float32)
+    blended = overlay_bgr * alpha + region * (1.0 - alpha)
+    out[y0:y0+h, x0:x0+w] = blended.astype(out.dtype)
+    return out
+    
+async def main():
+    config = Config()
+
+    # Optical flow setup
+    of = OpticalFlow()
+
+    # Pointer setup
+    cam = Camera(config.POSE_MODEL)
+    cam.start()
+    pointer = [0.5, 0.5, 0.0]
+    pointer_goal = [0.5, 0.5, 0.0]
+
+    # Simulator setup
+    sim = Simulator(
+        IMAGE_SIZE=config.IMAGE_SIZE,
+        PIXELS_PER_CELL=config.PIXELS_PER_CELL,
+        G=config.G, L=4,
+        smooth=15,
+    )
+    sim_constraints_on = True
+    sim_go_back_on = True
+    sim_gradient_on = False
+    #img_a = cv2.imread(r"..\..\brand\logo_square.png")
+    img_a = cv2.imread(r"..\..\input\19.png")
+    if img_a is None:
+        img_a = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+    else:
+        img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+    sim.reset(img_a)
+    logo = cv2.imread(r"..\..\brand\logo_white.png")
+
+    # Ray tracer setup
+    ray = RayTracer(
+        W=config.WINDOW_W,
+        H=config.WINDOW_H,
+        G=config.G,
+        camera=config.camera,
+        target=config.target,
+        light=config.light,
+        fov=config.fov,
+        samples=config.samples,
+        background=config.background,
+        ambient=config.ambient,
+        shadow=config.shadow,
+    )
+    ray_shape = 4
+    frame = img_a.copy()
+    frames = deque()
+
+    # Window setup
+    cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
+
+    # Bus setup
+    bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
+    await bus.connect()
+
+    # async def on_ai_message(session_id, nickname, text, audio_bytes, image_bytes):
+    #     nonlocal img_a
+
+    #     if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
+    #         return
+
+    #     if not image_bytes:
+    #         return
+
+    #     kb = int(len(image_bytes) / 1024)
+    #     print(f"✓ PC: message received with image {kb} KB from {nickname}")
+
+    #     buf = np.frombuffer(image_bytes, dtype=np.uint8)
+    #     img_b = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    #     if img_b is None:
+    #         print("✗ PC: failed to decode received image")
+    #         return
+
+    #     img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+
+    #     start_img = frames[-1] if frames else img_a
+    #     interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
+
+    #     added = 0
+    #     if interpolated is not None:
+    #         for interp in interpolated:
+    #             if interp is not None:
+    #                 frames.append(interp)
+    #                 added += 1
+
+    #     frames.append(img_b)
+    #     added += 1
+    #     img_a = img_b
+
+    #     print(f"✓ PC: appended {added} frames, queue size is now {len(frames)} at {config.FPS} FPS")
+
+    async def on_ai_message(session_id, nickname, parts, payload):
+        nonlocal img_a
+
+        if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
+            return
+
+        image_bytes = get_image_bytes_from_parts(parts)
+        if not image_bytes:
+            return
+
+        kb = int(len(image_bytes) / 1024)
+        print(f"✓ PC: message received with image {kb} KB from {nickname}")
+
+        buf = np.frombuffer(image_bytes, dtype=np.uint8)
+        img_b = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if img_b is None:
+            print("✗ PC: failed to decode received image")
+            return
+
+        img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+
+        start_img = frames[-1] if frames else img_a
+        interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
+
+        added = 0
+        if interpolated is not None:
+            for interp in interpolated:
+                if interp is not None:
+                    frames.append(interp)
+                    added += 1
+
+        frames.append(img_b)
+        added += 1
+        img_a = img_b
+
+        print(f"✓ PC: appended {added} frames, queue size is now {len(frames)} at {config.FPS} FPS")
+
+    async def on_user_like(session_id, nickname):
+        nonlocal frame
+
+        if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
+            return
+
+        out = overlay(frame, logo, proportion=20, alignment="bottom center")
+        image_bytes = get_image_bytes(out)
+        await bus.publish_ai_message_to_phone(
+            session_id=session_id,
+            nickname="NonCarbon Artist",
+            text=f"Glad you liked it, {nickname}",
+            image_bytes=image_bytes,
+        )
+        kb = int(len(image_bytes) / 1024)
+        print(f"✓ PC: got a like from {nickname} and sent the current frame {kb} KB")
+
+    async def on_user_gesture(session_id, nickname, x, y, z):
+        nonlocal pointer_goal
+
+        if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
+            return
+
+        print(f"✓ PC: new gesture from {nickname} ({x:.3f},{y:.3f},{z:.3f})")
+        pointer_goal[0] = x
+        pointer_goal[1] = y
+        pointer_goal[2] = z
+
+    async def on_settings(params):
+        nonlocal ray_shape, sim_constraints_on, sim_go_back_on
+
+        if 'constraints_on' in params:
+            sim_constraints_on = bool(params['constraints_on'])
+            print(f"✓ PC: sim constraints set to {sim_constraints_on}")
+
+        if 'go_back_on' in params:
+            sim_go_back_on = bool(params['go_back_on'])
+            print(f"✓ PC: sim go back set to {sim_go_back_on}")
+
+        if 'gradient_on' in params:
+            sim_gradient_on = bool(params['gradient_on'])
+            print(f"✓ PC: sim gradient set to {sim_gradient_on}")
+
+        if 'shape' in params:
+            ray_shape = int(params['shape'])
+            print(f"✓ PC: ray shape set to {ray_shape}")
+
+        if 'zoom' in params:
+            ray.fov = float(params['zoom'])
+            print(f"✓ PC: ray zoom set to {ray.fov:.1f}")
+
+    bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
+    bus.on(Bus.USER_LIKE, on_user_like)
+    bus.on(Bus.USER_GESTURE, on_user_gesture)
+    bus.on(Bus.SETTINGS, on_settings)
+
+    # Session setup
+    session = Session(config.URL)
+    session.create_session()
+    await bus.publish_session(session_id=session.session_id)
+    qr_img = session.generate_qr_code()
+
+    render_frame_dur = 1.0 / config.FPS
+    release_frame_dur = 1.0 / config.FPS
+    next_tick = time.perf_counter()
+    next_release = next_tick
+
+    while True:
+        await bus.poll()
+
+        now = time.perf_counter()
+        if now < next_tick:
+            await asyncio.sleep(next_tick - now)
+        now = time.perf_counter()
+        next_tick += render_frame_dur
+
+        if now >= next_release:
+            if frames:
+                sim.reset(frames.popleft())
+            next_release += release_frame_dur
+            if now > next_release + release_frame_dur:
+                next_release = now + release_frame_dur
+
+        ok, canvas, frame, result = cam.read()
+        if not ok:
+            continue
+        hand = cam.get_hand_raw(result)
+        if hand is not None:
+            pointer_goal[0] = hand["x"]
+            pointer_goal[1] = 1.0 - hand["y"]
+        pointer_prior_x = pointer[0]
+        pointer_prior_y = pointer[1]
+        alpha = 0.1
+        pointer[0] += (pointer_goal[0] - pointer[0]) * alpha
+        pointer[1] += (pointer_goal[1] - pointer[1]) * alpha
+        vx = (pointer[0] - pointer_prior_x) / alpha
+        vy = (pointer[1] - pointer_prior_y) / alpha
+        vz = np.hypot(vx, vy)
+        sim.inject_mouse(pointer, [vx, vy, vz])
+        if sim_gradient_on:
+            sim.inject_gradient()
+
+        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
+        if ray_shape == 0:
+            frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
+        elif ray_shape == 1:
+            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.9 * sim.r, 0.9 * sim.r, 6.0 * sim.r)
+        elif ray_shape == 2:
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.3 * sim.r)
+        elif ray_shape == 3:
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
+        else:
+            frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
+
+        out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
+        cv2.imshow(config.APP_NAME, out)
+
+        key = cv2.waitKeyEx(1)
+        if key in (ord('q'), 27):
+            break
+
+    cv2.destroyAllWindows()
+    await bus.close()
+
+if __name__ == '__main__':
+    asyncio.run(main())

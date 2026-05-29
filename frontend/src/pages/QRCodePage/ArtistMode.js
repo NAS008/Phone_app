@@ -1232,17 +1232,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
             or a voice note.
           </p>
         </div>
-        {isAdmin && (
-          <button
-            type="button"
-            className={`icon-button action-button${isSettingsPanelOpen ? " toggled" : ""}`}
-            onClick={() => setIsSettingsPanelOpen((open) => !open)}
-            aria-label="Open settings"
-            aria-expanded={isSettingsPanelOpen}
-          >
-            <SettingsIcon />
-          </button>
-        )}
       </header>
 
       {/* Keeping the current-canvas preview block in place for later iteration.
@@ -1643,6 +1632,18 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
               >
                 <HeartIcon />
               </button>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  className={`icon-button action-button${isSettingsPanelOpen ? " toggled" : ""}`}
+                  onClick={() => setIsSettingsPanelOpen((open) => !open)}
+                  aria-label="Open settings"
+                  aria-expanded={isSettingsPanelOpen}
+                >
+                  <SettingsIcon />
+                </button>
+              )}
 
               <div className="action-cluster action-cluster--right">
                 <button

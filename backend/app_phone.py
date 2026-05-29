@@ -232,10 +232,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"success": False, "error": str(exc)}, status=500)
 
     def handle_user_joined(self, payload):
-        asyncio.run(self.server.bus.publish_user_joined(
-            session_id=payload.get("session_id"),
-            nickname=payload.get("nickname"),
-        ))
+        self.server.bus._publish(Bus.USER_JOINED, {
+            "session_id": str(payload.get("session_id") or ""),
+            "nickname": payload.get("nickname"),
+        })
         self.send_json({"success": True, "result": "user_joined published"})
 
     def handle_user_message(self, payload):
@@ -244,32 +244,27 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         self.send_json({"success": True, "result": "user_message published"})
 
     def handle_user_like(self, payload):
-        asyncio.run(self.server.bus.publish_user_like(
-            session_id=payload.get("session_id"),
-            nickname=payload.get("nickname"),
-        ))
+        self.server.bus._publish(Bus.USER_LIKE, {
+            "session_id": str(payload.get("session_id") or ""),
+            "nickname": payload.get("nickname"),
+        })
         self.send_json({"success": True, "result": "user_like published"})
 
     def handle_user_gesture(self, payload):
-        asyncio.run(self.server.bus.publish_user_gesture(
-            session_id=payload.get("session_id"),
-            nickname=payload.get("nickname"),
-            x=float(payload.get("x", 0.0)),
-            y=float(payload.get("y", 0.0)),
-            z=float(payload.get("z", 0.0)),
-        ))
+        self.server.bus._publish(Bus.USER_GESTURE, {
+            "session_id": str(payload.get("session_id") or ""),
+            "nickname": payload.get("nickname"),
+            "x": float(payload.get("x", 0.0)),
+            "y": float(payload.get("y", 0.0)),
+            "z": float(payload.get("z", 0.0)),
+        })
         self.send_json({"success": True, "result": "user_gesture published"})
 
     def handle_settings(self, payload):
-        settings = {
-            k: v for k, v in payload.items()
-            if k not in {"session_id", "nickname"}
-        }
-        asyncio.run(self.server.bus.publish_settings(
-            session_id=payload.get("session_id"),
-            nickname=payload.get("nickname"),
-            **settings,
-        ))
+        bus_payload = dict(payload)
+        if bus_payload.get("session_id") is not None:
+            bus_payload["session_id"] = str(bus_payload["session_id"])
+        self.server.bus._publish(Bus.SETTINGS, bus_payload)
         self.send_json({"success": True, "result": "settings published"})
 
     def handle_transcribe_audio(self, payload):

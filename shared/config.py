@@ -1,6 +1,10 @@
+import os as _os
+from dotenv import load_dotenv as _load_dotenv
+_load_dotenv(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '.env'))
+
 class Config:
     # App
-    URL = "https://TheFirstNoncarbonArtist.com"
+    URL = "https://tfnca.com"
     ADMIN_SESSION_ID = "1234"  # change this whenever you want; all apps accept it
     APP_NAME = "RTX4070"
     PHONE_NAME = "PHONE"

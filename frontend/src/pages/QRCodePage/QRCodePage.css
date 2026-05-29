@@ -1,5 +1,5 @@
 .qrcode-page {
-  height: 100vh;
+  height: 100dvh;
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 34%),
     linear-gradient(180deg, #202020 0%, #0a0a0a 46%, #050505 100%);
@@ -9,7 +9,7 @@
 
 .qrcode-shell {
   width: min(100%, 540px);
-  height: 100vh;
+  height: 100dvh;
   margin: 0 auto;
   overflow: hidden;
 }

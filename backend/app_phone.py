@@ -154,6 +154,19 @@ class MessageStore:
                 items = [m for m in items if m.get("received_at_ms", 0) > after_ms]
             return items[:limit]
 
+class GifStore:
+    def __init__(self):
+        self._data = None
+        self._lock = threading.Lock()
+
+    def set(self, data: bytes):
+        with self._lock:
+            self._data = data
+
+    def get(self):
+        with self._lock:
+            return self._data
+
 class MessageBusRequestHandler(BaseHTTPRequestHandler):
     def send_json(self, data, status=200):
         body = json.dumps(data).encode("utf-8")
@@ -208,6 +221,19 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/server_time":
             self.send_json({"ts": _now_ms()})
+            return
+
+        if parsed.path == "/api/video":
+            gif_data = self.server.gif_store.get()
+            if gif_data is None:
+                self.send_json({"success": False, "error": "No video available"}, status=404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/gif")
+            self.send_header("Content-Length", str(len(gif_data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(gif_data)
             return
 
         if parsed.path == "/health":
@@ -323,10 +349,11 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         return
 
 class AIMessageListener(threading.Thread):
-    def __init__(self, config, store):
+    def __init__(self, config, store, gif_store):
         super().__init__(daemon=True)
         self.config = config
         self.store = store
+        self.gif_store = gif_store
         self.stopped = threading.Event()
 
     def run(self):
@@ -415,13 +442,20 @@ class AIMessageListener(threading.Thread):
                 result["parts"].append({"kind": "text", "text": part.get("text")})
 
             elif kind == "image" and part.get("data") is not None:
+                mime = part.get("mime_type", "image/jpeg")
                 data = _coerce_bytes(part.get("data"))
-                result["parts"].append({
-                    "kind": "image",
-                    "mime_type": part.get("mime_type", "image/jpeg"),
-                    "purpose": part.get("purpose", "output"),
-                    "image_base64": base64.b64encode(data).decode("utf-8"),
-                })
+                if mime == "image/gif":
+                    # Serve GIF via /api/video to avoid embedding MBs in JSON poll
+                    self.gif_store.set(data)
+                    result["video_url"] = "/api/video"
+                    print(f"✓ Phone listener: GIF stored ({len(data) // 1024} KB) → /api/video")
+                else:
+                    result["parts"].append({
+                        "kind": "image",
+                        "mime_type": mime,
+                        "purpose": part.get("purpose", "output"),
+                        "image_base64": base64.b64encode(data).decode("utf-8"),
+                    })
 
         for part in result["parts"]:
             if part["kind"] == "image" and "image_base64" in part:
@@ -448,7 +482,8 @@ def run_backend(host="0.0.0.0", port=None):
     asyncio.run(bus.connect())
 
     message_store = MessageStore()
-    listener = AIMessageListener(config, message_store)
+    gif_store = GifStore()
+    listener = AIMessageListener(config, message_store, gif_store)
     listener.start()
 
     try:
@@ -461,6 +496,7 @@ def run_backend(host="0.0.0.0", port=None):
     server = ThreadingHTTPServer((host, port), MessageBusRequestHandler)
     server.bus = bus
     server.message_store = message_store
+    server.gif_store = gif_store
     server.audio_processor = audio_processor
 
     print(f"✓ Backend bus server running on http://{host}:{port}")

@@ -595,10 +595,12 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
               ? `data:audio/mpeg;base64,${msg.audio_base64}`
               : null;
             const mime = msg.image_mime_type || "image/jpeg";
-            const imageSrc = msg.image_base64
+            const imageSrc = msg.video_url
+              ? `${MessageBusService.apiUrl}${msg.video_url}`
+              : msg.image_base64
               ? `data:${mime};base64,${msg.image_base64}`
               : null;
-            const imageExt = mime === "image/gif" ? "gif" : "jpg";
+            const imageExt = msg.video_url ? "gif" : mime === "image/gif" ? "gif" : "jpg";
 
             // AI_MESSAGE always shows in the feed regardless of which user sent it
             if (text || audioSrc || imageSrc) {

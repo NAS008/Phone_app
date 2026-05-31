@@ -33,7 +33,7 @@ class Config:
     ambient = 0.4
     shadow = 0.4
     FPS = 12
-    VIDEO_SECONDS = 10  # rolling frame buffer depth for USER_VIDEO gif
+    VIDEO_SECONDS = 20  # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
     POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"

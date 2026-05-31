@@ -111,34 +111,7 @@ class StableDiffusion:
             latents = self.pipe.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
         return latents
-
-    # def generate_between_images(self, image_a_bgr, image_b_bgr, prompt=""):
-    #     latents_a = self.prepare_reference(image_a_bgr)
-    #     latents_b = self.prepare_reference(image_b_bgr)
-
-    #     prompt_embeds, negative_embeds, pooled_embeds, negative_pooled = self.encode_prompt(prompt)
-    #     embeds = torch.cat([negative_embeds, prompt_embeds], dim=0)
-    #     pooled = torch.cat([negative_pooled, pooled_embeds], dim=0)
-
-    #     generator = torch.Generator(device=self.DEVICE).manual_seed(self.SEED)
-    #     noise = torch.randn_like(latents_a, generator=generator)
-
-    #     sigma_min = 0.60
-    #     sigma_max = 0.90
-    #     frames = []
-
-    #     for i in range(1, self.INFERENCE_STEPS + 1):
-    #         t = i / (self.INFERENCE_STEPS + 1)
-    #         alpha = 0.5 - 0.5 * np.cos(np.pi * t)
-    #         sigma = sigma_min + (sigma_max - sigma_min) * (1.0 - (2.0 * alpha - 1.0) ** 2)
-    #         base_latents = self.slerp(latents_a, latents_b, alpha)
-    #         latents = self.denoise_from_sigma(base_latents, noise, sigma, embeds, pooled)
-    #         frame = self.decode_latents(latents)
-
-    #         frames.append(frame)
-
-    #     return frames
-    
+   
     def generate_between_images(self, image_a_bgr, image_b_bgr, prompt=""):
         latents_a = self.prepare_reference(image_a_bgr)
         latents_b = self.prepare_reference(image_b_bgr)
@@ -198,7 +171,6 @@ class AnimateDiff:
         print("✓ AnimateDiff ready")
 
     def _load_loras(self, loras):
-        # loras: list of (repo_id, adapter_name, weight)
         if self._active_loras:
             self.pipe.unload_lora_weights()
             self._active_loras = []
@@ -207,11 +179,7 @@ class AnimateDiff:
             return
 
         for repo_id, adapter_name, _ in loras:
-            self.pipe.load_lora_weights(
-                repo_id,
-                weight_name="diffusion_pytorch_model.safetensors",
-                adapter_name=adapter_name,
-            )
+            self.pipe.load_lora_weights(repo_id, adapter_name=adapter_name)
 
         names   = [n for _, n, _ in loras]
         weights = [w for _, _, w in loras]

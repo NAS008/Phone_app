@@ -135,7 +135,7 @@ const pickAcknowledgment = () =>
 const INTRO_TYPING_INTERVAL = 42;
 const INTRO_TYPING_TARGET = 70;
 const INTRO_MESSAGE_GAP = 620;
-const GYRO_SEND_INTERVAL = 320;
+const GYRO_SEND_INTERVAL = 100;
 const TRANSCRIPT_TYPING_TARGET = 60;
 const TRANSCRIPT_TYPING_INTERVAL = 22;
 
@@ -323,14 +323,15 @@ const deviceToWorldAccel = (ax, ay, az, alpha, beta, gamma) => {
   };
 };
 
-// Mean absolute pixel difference between two ImageData objects (RGB only, alpha ignored).
+// Mean absolute per-channel difference between two ImageData objects (0–255 scale, alpha ignored).
+// Returns the average |Δchannel| across all RGB channels and all pixels.
 const frameDiff = (a, b) => {
   const d1 = a.data, d2 = b.data;
   let sum = 0;
   for (let i = 0; i < d1.length; i += 4) {
     sum += Math.abs(d1[i] - d2[i]) + Math.abs(d1[i + 1] - d2[i + 1]) + Math.abs(d1[i + 2] - d2[i + 2]);
   }
-  return sum / (d1.length / 4);
+  return sum / (d1.length / 4 * 3); // divide by total RGB channel count → true per-channel mean
 };
 
 const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
@@ -1047,7 +1048,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
 
     let cancelled = false;
     const ACCEL_DEADBAND = 0.08;    // m/s² — filter sensor noise
-    const STATIONARY_DIFF = 6;      // mean pixel diff threshold for ZUPT
+    const STATIONARY_DIFF = 6;      // mean per-channel diff threshold (0–255 scale) for ZUPT
     const FRAME_W = 64, FRAME_H = 48;
 
     const offscreen = document.createElement("canvas");
@@ -1078,27 +1079,24 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         }
       }
 
+      // Map orientation angles to normalized [0,1] grid coords — no drift possible.
+      // gamma: tilt left/right −90°→+90°  →  x 0→1
+      // beta:  tilt back/forward −90°→+90° →  y 0→1 (tilting toward you moves pointer down)
+      const { alpha, beta, gamma } = gyroDataRef.current;
+      const x = Math.max(0, Math.min(1, ((gamma ?? 0) + 90) / 180));
+      const y = Math.max(0, Math.min(1, (90 - (beta  ?? 0)) / 180));
+
       if (isStationary) {
-        velocityRef.current = { x: 0, y: 0, z: 0 };
+        positionRef.current = { x, y, z: 0 };
         return;
       }
 
-      // Rotate device acceleration into world frame and integrate
-      const { alpha, beta, gamma } = gyroDataRef.current;
+      // z = world-frame acceleration magnitude → drives vz force in sim
       const { x: ax, y: ay, z: az } = motionDataRef.current;
       const w = deviceToWorldAccel(ax, ay, az, alpha, beta, gamma);
+      const speed = Math.sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
 
-      const wx = Math.abs(w.x) > ACCEL_DEADBAND ? w.x : 0;
-      const wy = Math.abs(w.y) > ACCEL_DEADBAND ? w.y : 0;
-      const wz = Math.abs(w.z) > ACCEL_DEADBAND ? w.z : 0;
-
-      velocityRef.current.x += wx * dt;
-      velocityRef.current.y += wy * dt;
-      velocityRef.current.z += wz * dt;
-
-      positionRef.current.x += velocityRef.current.x * dt;
-      positionRef.current.y += velocityRef.current.y * dt;
-      positionRef.current.z += velocityRef.current.z * dt;
+      positionRef.current = { x, y, z: speed };
     }, 100);
 
     // 320 ms — transmit position to the bus
@@ -1211,7 +1209,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         <div className="assistant-copy">
           <h1>{nickname ? `Hello ${nickname}` : "Hello"}</h1>
           <p>
-            Guide the next artwork with an idea, image or voice note
+            Guide the artwork with an idea, image or voice note
           </p>
         </div>
       </header>

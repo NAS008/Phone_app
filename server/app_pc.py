@@ -278,9 +278,8 @@ async def main():
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
 
-        print(f"✓ PC: new gesture from {nickname} ({x:.3f},{y:.3f},{z:.3f})")
-        pointer_goal[0] = x
-        pointer_goal[1] = y
+        pointer_goal[0] = max(0.0, min(1.0, x))
+        pointer_goal[1] = max(0.0, min(1.0, y))
         pointer_goal[2] = z
 
     async def on_settings(params):
@@ -347,7 +346,7 @@ async def main():
             pointer_goal[1] = 1.0 - hand["y"]
         pointer_prior_x = pointer[0]
         pointer_prior_y = pointer[1]
-        alpha = 0.1
+        alpha = 0.3
         pointer[0] += (pointer_goal[0] - pointer[0]) * alpha
         pointer[1] += (pointer_goal[1] - pointer[1]) * alpha
         vx = (pointer[0] - pointer_prior_x) / alpha

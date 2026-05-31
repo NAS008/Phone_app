@@ -15,6 +15,7 @@
 
 import asyncio
 import base64
+import io
 import json
 import threading
 import time
@@ -22,6 +23,7 @@ import msgpack
 import redis
 import urllib.parse
 import sys as _sys, os as _os
+from PIL import Image
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +48,20 @@ def _coerce_bytes(value):
         return base64.b64decode(value)
     raise TypeError(f"Unsupported binary type: {type(value).__name__}")
 
+def _square_crop_image(data: bytes, size: int) -> bytes:
+    img = Image.open(io.BytesIO(data))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    img = img.crop((left, top, left + side, top + side))
+    img = img.resize((size, size), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
+
 def _normalize_http_part(part):
     kind = part.get("kind")
 
@@ -53,11 +69,13 @@ def _normalize_http_part(part):
         return {"kind": "text", "text": part.get("text")}
 
     if kind == "image":
+        raw = _coerce_bytes(part.get("data"))
+        processed = _square_crop_image(raw, Config.IMAGE_SIZE)
         return {
             "kind": "image",
-            "mime_type": part.get("mime_type", "image/jpeg"),
+            "mime_type": "image/jpeg",
             "purpose": part.get("purpose", "input"),
-            "data": _coerce_bytes(part.get("data")),
+            "data": processed,
         }
 
     raise ValueError(f"Unsupported part kind: {kind}")
@@ -68,12 +86,14 @@ def _normalize_http_payload_to_bus_message(payload):
         parts = []
         if payload.get("text") is not None:
             parts.append({"kind": "text", "text": payload.get("text")})
+
         if payload.get("image_bytes") is not None:
+            raw = _coerce_bytes(payload.get("image_bytes"))
             parts.append({
                 "kind": "image",
-                "mime_type": payload.get("image_mime_type", "image/jpeg"),
+                "mime_type": "image/jpeg",
                 "purpose": payload.get("image_purpose", "input"),
-                "data": _coerce_bytes(payload.get("image_bytes")),
+                "data": _square_crop_image(raw, Config.IMAGE_SIZE),
             })
     else:
         parts = [_normalize_http_part(part) for part in parts]

@@ -32,14 +32,17 @@ class Config:
     background = [0.0, 0.0, 0.0]
     ambient = 0.4
     shadow = 0.4
-    FPS = 12
-    VIDEO_SECONDS = 20  # rolling frame buffer depth for USER_VIDEO gif
+    FPS = 16
+    VIDEO_SECONDS = 5 # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
     POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
     
     # Context
     CONTEXT_SIZE = 20  # max conversation turns kept per session
+
+    # Phone backend (for direct HTTP uploads that bypass the bus)
+    PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
 
     # Bus
     redis_host     = "tfnca-redis.redis.cache.windows.net"
@@ -70,7 +73,7 @@ class Config:
     AD_SEED            = 80367253
 
     # Optical flow
-    OF_FRAMES = 36
+    OF_FRAMES = 32
 
     STYLE = [
         "In style of high-detail vintage botanical lithograph. Pale salmon, dusty rose, and muted sage green, solid black background.",

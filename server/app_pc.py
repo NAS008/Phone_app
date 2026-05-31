@@ -26,6 +26,8 @@
 
 import cv2
 import io
+import urllib.request
+import urllib.parse
 import numpy as np
 import asyncio
 import ctypes
@@ -176,7 +178,7 @@ async def main():
     ray_shape = 4
     frame = img_a.copy()
     frames = deque()
-    thumb_size = config.IMAGE_SIZE // 4
+    thumb_size = config.IMAGE_SIZE // 2
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
 
     # Window setup
@@ -302,14 +304,25 @@ async def main():
         kb = len(gif_bytes) // 1024
         print(f"✓ PC: video gif — {len(snapshot)} frames, {kb} KB")
 
-        await bus.publish_ai_message_to_phone(
-            session_id=session.session_id,
-            nickname="NonCarbon Artist",
-            text=f"Last {config.VIDEO_SECONDS}s of the artwork",
-            image_bytes=gif_bytes,
-            image_mime_type="image/gif",
-            image_purpose="output",
-        )
+        # Upload directly to phone backend via HTTP — bypasses Redis pub/sub size limits
+        qs = urllib.parse.urlencode({
+            "session_id": session.session_id,
+            "nickname": "NonCarbon Artist",
+            "text": f"Last {config.VIDEO_SECONDS}s of the artwork",
+        })
+        upload_url = f"{config.PHONE_BACKEND_URL}/api/gif_upload?{qs}"
+        loop = asyncio.get_event_loop()
+        def _upload():
+            req = urllib.request.Request(
+                upload_url,
+                data=gif_bytes,
+                method="POST",
+                headers={"Content-Type": "image/gif", "Content-Length": str(len(gif_bytes))},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read()
+        await loop.run_in_executor(None, _upload)
+        print(f"✓ PC: GIF uploaded to phone backend ({kb} KB)")
 
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
     bus.on(Bus.USER_LIKE, on_user_like)

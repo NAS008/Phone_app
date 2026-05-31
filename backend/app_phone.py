@@ -276,6 +276,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
                 self.handle_user_video(payload)
                 return
 
+            if parsed.path == "/api/gif_upload":
+                self.handle_gif_upload(parsed)
+                return
+
             self.send_json({"success": False, "error": "Not found"}, status=404)
 
         except Exception as exc:
@@ -306,6 +310,38 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             "nickname": payload.get("nickname"),
         })
         self.send_json({"success": True, "result": "user_video published"})
+
+    def handle_gif_upload(self, parsed):
+        params = urllib.parse.parse_qs(parsed.query)
+        session_id = (params.get("session_id", [None])[0]) or ""
+        nickname   = (params.get("nickname",   ["NonCarbon Artist"])[0])
+        text       = (params.get("text",       ["Video clip"])[0])
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        gif_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+        if not gif_bytes:
+            self.send_json({"success": False, "error": "No GIF data received"}, status=400)
+            return
+
+        self.server.gif_store.set(gif_bytes)
+        kb = len(gif_bytes) // 1024
+        print(f"✓ Phone: GIF uploaded via HTTP ({kb} KB) → /api/video")
+
+        message = {
+            "v": 1,
+            "id": None,
+            "session_id": session_id,
+            "nickname": nickname,
+            "role": "assistant",
+            "turn_id": None,
+            "final": True,
+            "received_at_ms": _now_ms(),
+            "text": text,
+            "parts": [],
+            "video_url": "/api/video",
+        }
+        self.server.message_store.add(message)
+        self.send_json({"success": True, "kb": kb})
 
     def handle_user_gesture(self, payload):
         self.server.bus._publish(Bus.USER_GESTURE, {

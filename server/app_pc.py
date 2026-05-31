@@ -176,7 +176,7 @@ async def main():
     ray_shape = 4
     frame = img_a.copy()
     frames = deque()
-    thumb_size = config.IMAGE_SIZE // 2
+    thumb_size = config.IMAGE_SIZE // 4
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
 
     # Window setup

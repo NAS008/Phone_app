@@ -307,7 +307,7 @@ async def main():
 
         # Upload directly to phone backend via HTTP — bypasses Redis pub/sub size limits
         qs = urllib.parse.urlencode({
-            "session_id": session.session_id,
+            "session_id": session_id,
             "nickname": "NonCarbon Artist",
             "text": f"Last {config.VIDEO_SECONDS}s of the artwork",
         })

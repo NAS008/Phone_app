@@ -551,6 +551,7 @@
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
   background:
     radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.025) 32%, transparent 68%),
     rgba(6, 6, 6, 0.96);

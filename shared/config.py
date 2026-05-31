@@ -33,6 +33,7 @@ class Config:
     ambient = 0.4
     shadow = 0.4
     FPS = 12
+    VIDEO_SECONDS = 10  # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
     POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
@@ -69,7 +70,7 @@ class Config:
     AD_SEED            = 80367253
 
     # Optical flow
-    OF_FRAMES = 24
+    OF_FRAMES = 36
 
     STYLE = [
         "In style of high-detail vintage botanical lithograph. Pale salmon, dusty rose, and muted sage green, solid black background.",
@@ -97,14 +98,14 @@ class Config:
     ]
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
-        ("zoom-in",  0.80, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),
-        ("zoom-out", 0.80, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out"),
-        ("pan-left", 0.75, "drifting left",               "guoyww/animatediff-motion-lora-pan-left"),
-        ("pan-right",0.75, "drifting right",              "guoyww/animatediff-motion-lora-pan-right"),
-        ("tilt-up",  0.75, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up"),
-        ("tilt-down",0.50, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down"),
-        ("roll-cw",  0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
-        ("roll-ccw", 0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
+        ("zoom-in",  0.8, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),
+        ("zoom-out", 0.8, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out"),
+        ("pan-left", 0.8, "drifting left",               "guoyww/animatediff-motion-lora-pan-left"),
+        ("pan-right",0.8, "drifting right",              "guoyww/animatediff-motion-lora-pan-right"),
+        ("tilt-up",  0.8, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up"),
+        ("tilt-down",0.8, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down"),
+        ("roll-cw",  0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
+        ("roll-ccw", 0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
         (None,       None, "sways gently in the wind",    None),
     ]
     SUBJECTS = [

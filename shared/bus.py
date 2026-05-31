@@ -10,6 +10,7 @@ class Bus:
     USER_MESSAGE = "user_message"
     USER_LIKE = "user_like"
     USER_GESTURE = "user_gesture"
+    USER_VIDEO = "user_video"
     AI_MESSAGE_TO_PC = "ai_message_to_pc"
     AI_MESSAGE_TO_PHONE = "ai_message_to_phone"
     SETTINGS = "settings"
@@ -20,6 +21,7 @@ class Bus:
         USER_MESSAGE,
         USER_LIKE,
         USER_GESTURE,
+        USER_VIDEO,
         AI_MESSAGE_TO_PC,
         AI_MESSAGE_TO_PHONE,
         SETTINGS,
@@ -123,6 +125,12 @@ class Bus:
             "nickname": nickname,
         })
 
+    async def publish_user_video(self, session_id="0", nickname="Nuno"):
+        self._publish(self.USER_VIDEO, {
+            "session_id": str(session_id),
+            "nickname": nickname,
+        })
+
     async def publish_user_gesture(self, session_id="0", nickname="Nuno", x=0.0, y=0.0, z=0.0):
         self._publish(self.USER_GESTURE, {
             "session_id": str(session_id),
@@ -207,7 +215,7 @@ class Bus:
                     payload,
                 )
 
-            elif channel == self.USER_LIKE:
+            elif channel in (self.USER_LIKE, self.USER_VIDEO):
                 return await self._call_handler(
                     handler,
                     payload.get("session_id"),

@@ -99,6 +99,13 @@ class MessageBusService {
     });
   }
 
+  async sendUserVideo(sessionId, nickname) {
+    return this.postMsgpack("/api/publish/user_video", {
+      session_id: String(sessionId),
+      nickname: String(nickname),
+    });
+  }
+
   // ── Polling ────────────────────────────────────────────────────────────────
 
   /**

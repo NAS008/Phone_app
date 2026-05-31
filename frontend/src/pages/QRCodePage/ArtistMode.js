@@ -290,6 +290,15 @@ const SettingsIcon = (props) => (
   </svg>
 );
 
+const VideoIcon = (props) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+    width="18" height="18" aria-hidden="true" {...props}>
+    <rect x="2" y="6" width="15" height="12" rx="2" />
+    <path d="M17 9l5-3v12l-5-3V9z" />
+  </svg>
+);
+
 const HeartIcon = (props) => (
   <svg
     width="18"
@@ -349,6 +358,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [audioWidgetDisplayText, setAudioWidgetDisplayText] = useState("");
   const [isGyroEnabled, setIsGyroEnabled] = useState(false);
   const [isLikePulsing, setIsLikePulsing] = useState(false);
+  const [isVideoRequesting, setIsVideoRequesting] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [settingsMode, setSettingsMode] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
@@ -551,6 +561,19 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
     }
   }, [flashNotice, nickname, sessionId]);
 
+  const handleVideoRequest = useCallback(async () => {
+    if (isVideoRequesting) return;
+    setIsVideoRequesting(true);
+    try {
+      await MessageBusService.sendUserVideo(sessionId, nickname);
+      flashNotice("success", "Video requested…");
+    } catch {
+      flashNotice("error", "Video request failed.");
+    } finally {
+      setIsVideoRequesting(false);
+    }
+  }, [flashNotice, isVideoRequesting, nickname, sessionId]);
+
   useEffect(() => {
     if (!sessionId) return undefined;
 
@@ -571,9 +594,11 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
             const audioSrc = msg.audio_base64
               ? `data:audio/mpeg;base64,${msg.audio_base64}`
               : null;
+            const mime = msg.image_mime_type || "image/jpeg";
             const imageSrc = msg.image_base64
-              ? `data:image/jpeg;base64,${msg.image_base64}`
+              ? `data:${mime};base64,${msg.image_base64}`
               : null;
+            const imageExt = mime === "image/gif" ? "gif" : "jpg";
 
             // AI_MESSAGE always shows in the feed regardless of which user sent it
             if (text || audioSrc || imageSrc) {
@@ -583,7 +608,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
                   image: imageSrc,
                   senderNickname: msg.nickname || "NonCarbon Artist",
                   downloadUrl: imageSrc || null,
-                  downloadName: imageSrc ? `noncarbon-artwork-${msg.received_at_ms || Date.now()}.jpg` : null,
+                  downloadName: imageSrc ? `noncarbon-artwork-${msg.received_at_ms || Date.now()}.${imageExt}` : null,
                 })
               );
             }
@@ -1584,6 +1609,17 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
             aria-label="Like — request image share"
           >
             <HeartIcon />
+          </button>
+
+          <button
+            type="button"
+            className={`icon-button action-button${isVideoRequesting ? " toggled" : ""}`}
+            onClick={handleVideoRequest}
+            disabled={isVideoRequesting}
+            aria-label="Request video clip"
+            title="Get animated clip"
+          >
+            <VideoIcon />
           </button>
 
           {isAdmin && (

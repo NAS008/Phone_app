@@ -25,11 +25,13 @@
 # ✗ Fix insert triangle to reduce the number of hit cells
 
 import cv2
+import io
 import numpy as np
 import asyncio
 import ctypes
 import time
 from collections import deque
+from PIL import Image
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
@@ -131,8 +133,10 @@ async def main():
     of = OpticalFlow()
 
     # Pointer setup
-    cam = Camera(config.POSE_MODEL)
-    cam.start()
+    pc_cam_on = False
+    if pc_cam_on:
+        cam = Camera(config.POSE_MODEL)
+        cam.start()
     pointer = [0.5, 0.5, 0.0]
     pointer_goal = [0.5, 0.5, 0.0]
 
@@ -172,6 +176,8 @@ async def main():
     ray_shape = 4
     frame = img_a.copy()
     frames = deque()
+    thumb_size = config.IMAGE_SIZE // 2
+    last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -181,42 +187,6 @@ async def main():
     # Bus setup
     bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
     await bus.connect()
-
-    # async def on_ai_message(session_id, nickname, text, audio_bytes, image_bytes):
-    #     nonlocal img_a
-
-    #     if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
-    #         return
-
-    #     if not image_bytes:
-    #         return
-
-    #     kb = int(len(image_bytes) / 1024)
-    #     print(f"✓ PC: message received with image {kb} KB from {nickname}")
-
-    #     buf = np.frombuffer(image_bytes, dtype=np.uint8)
-    #     img_b = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-    #     if img_b is None:
-    #         print("✗ PC: failed to decode received image")
-    #         return
-
-    #     img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-
-    #     start_img = frames[-1] if frames else img_a
-    #     interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
-
-    #     added = 0
-    #     if interpolated is not None:
-    #         for interp in interpolated:
-    #             if interp is not None:
-    #                 frames.append(interp)
-    #                 added += 1
-
-    #     frames.append(img_b)
-    #     added += 1
-    #     img_a = img_b
-
-    #     print(f"✓ PC: appended {added} frames, queue size is now {len(frames)} at {config.FPS} FPS")
 
     async def on_ai_message(session_id, nickname, parts, payload):
         nonlocal img_a
@@ -305,9 +275,46 @@ async def main():
             ray.fov = float(params['zoom'])
             print(f"✓ PC: ray zoom set to {ray.fov:.1f}")
 
+    async def on_user_video(session_id, nickname):
+        if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
+            return
+
+        snapshot = list(last_frames)
+        if not snapshot:
+            print("✗ PC: video requested but frame buffer is empty")
+            return
+
+        pil_frames = [
+            Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB))
+            for f in snapshot
+        ]
+        buf = io.BytesIO()
+        duration_ms = max(1, int(1000 / config.FPS))
+        pil_frames[0].save(
+            buf,
+            format="GIF",
+            save_all=True,
+            append_images=pil_frames[1:],
+            loop=0,
+            duration=duration_ms,
+        )
+        gif_bytes = buf.getvalue()
+        kb = len(gif_bytes) // 1024
+        print(f"✓ PC: video gif — {len(snapshot)} frames, {kb} KB")
+
+        await bus.publish_ai_message_to_phone(
+            session_id=session.session_id,
+            nickname="NonCarbon Artist",
+            text=f"Last {config.VIDEO_SECONDS}s of the artwork",
+            image_bytes=gif_bytes,
+            image_mime_type="image/gif",
+            image_purpose="output",
+        )
+
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
     bus.on(Bus.USER_LIKE, on_user_like)
     bus.on(Bus.USER_GESTURE, on_user_gesture)
+    bus.on(Bus.USER_VIDEO, on_user_video)
     bus.on(Bus.SETTINGS, on_settings)
 
     # Session setup
@@ -337,13 +344,15 @@ async def main():
             if now > next_release + release_frame_dur:
                 next_release = now + release_frame_dur
 
-        ok, canvas, frame, result = cam.read()
-        if not ok:
-            continue
-        hand = cam.get_hand_raw(result)
-        if hand is not None:
-            pointer_goal[0] = hand["x"]
-            pointer_goal[1] = 1.0 - hand["y"]
+        if pc_cam_on:
+            ok, canvas, frame, result = cam.read()
+            if not ok:
+                continue
+            hand = cam.get_hand_raw(result)
+            if hand is not None:
+                pointer_goal[0] = hand["x"]
+                pointer_goal[1] = 1.0 - hand["y"]
+                
         pointer_prior_x = pointer[0]
         pointer_prior_y = pointer[1]
         alpha = 0.3
@@ -367,6 +376,8 @@ async def main():
             frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
         else:
             frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
+
+        last_frames.append(cv2.resize(frame, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA))
 
         out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         cv2.imshow(config.APP_NAME, out)

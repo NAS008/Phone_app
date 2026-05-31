@@ -179,7 +179,11 @@ class AnimateDiff:
             return
 
         for repo_id, adapter_name, _ in loras:
-            self.pipe.load_lora_weights(repo_id, adapter_name=adapter_name)
+            self.pipe.load_lora_weights(
+                repo_id,
+                weight_name="diffusion_pytorch_model.safetensors",
+                adapter_name=adapter_name,
+            )
 
         names   = [n for _, n, _ in loras]
         weights = [w for _, _, w in loras]

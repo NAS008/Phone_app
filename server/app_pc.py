@@ -180,6 +180,8 @@ async def main():
     frames = deque()
     thumb_size = config.IMAGE_SIZE // 2
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
+    gif_last_frame = None
+    GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -393,7 +395,10 @@ async def main():
         else:
             frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
 
-        last_frames.append(cv2.resize(frame, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA))
+        thumb = cv2.resize(frame, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA)
+        if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
+            last_frames.append(thumb)
+            gif_last_frame = thumb
 
         out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         cv2.imshow(config.APP_NAME, out)

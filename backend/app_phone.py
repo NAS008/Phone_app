@@ -240,6 +240,19 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "status": "ok"})
             return
 
+        if parsed.path == "/api/debug":
+            gif = self.server.gif_store.get()
+            all_msgs = self.server.message_store.get_messages(limit=200)
+            self.send_json({
+                "gif_store_kb": len(gif) // 1024 if gif else 0,
+                "message_count": len(all_msgs),
+                "last_messages": [
+                    {k: v for k, v in m.items() if k not in ("image_base64", "parts")}
+                    for m in all_msgs[:5]
+                ],
+            })
+            return
+
         self.send_json({"success": False, "error": "Not found"}, status=404)
 
     def do_POST(self):

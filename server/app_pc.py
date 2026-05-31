@@ -322,8 +322,11 @@ async def main():
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return resp.read()
-        await loop.run_in_executor(None, _upload)
-        print(f"✓ PC: GIF uploaded to phone backend ({kb} KB)")
+        try:
+            result = await loop.run_in_executor(None, _upload)
+            print(f"✓ PC: GIF uploaded to phone backend ({kb} KB) — response: {result}")
+        except Exception as exc:
+            print(f"✗ PC: GIF upload failed — {exc}")
 
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
     bus.on(Bus.USER_LIKE, on_user_like)

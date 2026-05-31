@@ -747,13 +747,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         setAudioWidgetText("Voice note failed.");
         setAudioWidgetDisplayText("Voice note failed.");
         audioWidgetTimeoutRef.current = setTimeout(() => resetAudioWidget(), 1500);
-        appendFeed(
-          createFeedMessage(
-            "assistant",
-            `Voice note failed: ${error.message || "unknown error"}`,
-            { error: true }
-          )
-        );
         flashNotice("error", "Voice note failed to send.");
       } finally {
         setIsSubmitting(false);

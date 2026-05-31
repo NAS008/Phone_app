@@ -123,17 +123,25 @@ class AudioProcessor:
         self.model = model
 
     def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=[
-                "Transcribe this audio to text. Return only the transcript.",
-                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-            ],
-        )
-        text = (response.text or "").strip()
-        if not text:
-            raise ValueError("Empty transcript returned")
-        return text
+        last_exc = None
+        for attempt in range(3):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[
+                        "Transcribe this audio to text. Return only the transcript.",
+                        types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                    ],
+                )
+                text = (response.text or "").strip()
+                if not text:
+                    raise ValueError("Empty transcript returned")
+                return text
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(1.5)
+        raise last_exc
 
 
 class MessageStore:
@@ -390,12 +398,12 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         try:
             transcript = self.server.audio_processor.transcribe(audio_bytes)
             self.send_json({"success": True, "status": "success", "transcript": transcript})
-        except Exception as exc:
+        except Exception:
             self.send_json({
                 "success": False,
                 "status": "error",
-                "transcription_error": str(exc),
-                "error": str(exc),
+                "transcription_error": "Transcription failed. Please try again.",
+                "error": "Transcription failed. Please try again.",
             }, status=500)
 
     def log_message(self, format, *args):

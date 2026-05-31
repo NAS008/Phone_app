@@ -1094,9 +1094,10 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
       }
 
       // Tilt angle (clamped to ±TILT_RANGE) drives velocity, not position.
-      // gamma: tilt right → positive vx; beta: tilt toward you → positive vy.
+      // gamma: tilt right → positive vx (neutral = 0°).
+      // beta: neutral upright portrait = 90°, so offset by 90 before scaling.
       const vx = Math.max(-1, Math.min(1, (gamma ?? 0) / TILT_RANGE)) * MAX_SPEED;
-      const vy = Math.max(-1, Math.min(1, (beta  ?? 0) / TILT_RANGE)) * MAX_SPEED;
+      const vy = Math.max(-1, Math.min(1, ((beta ?? 90) - 90) / TILT_RANGE)) * MAX_SPEED;
 
       const pos = positionRef.current;
       positionRef.current = {

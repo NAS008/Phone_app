@@ -291,7 +291,7 @@ async def main():
             for f in snapshot
         ]
         buf = io.BytesIO()
-        duration_ms = max(1, int(1000 / (config.FPS * 4)))
+        duration_ms = max(1, int(1000 / (config.FPS * 8)))
         pil_frames[0].save(
             buf,
             format="GIF",

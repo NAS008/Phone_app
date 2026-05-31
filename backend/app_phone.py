@@ -245,6 +245,14 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
 
+        # Handle raw-body endpoints before parse_body() which only accepts msgpack/json
+        if parsed.path == "/api/gif_upload":
+            try:
+                self.handle_gif_upload(parsed)
+            except Exception as exc:
+                self.send_json({"success": False, "error": str(exc)}, status=500)
+            return
+
         try:
             payload = self.parse_body()
 
@@ -274,10 +282,6 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/publish/user_video":
                 self.handle_user_video(payload)
-                return
-
-            if parsed.path == "/api/gif_upload":
-                self.handle_gif_upload(parsed)
                 return
 
             self.send_json({"success": False, "error": "Not found"}, status=404)

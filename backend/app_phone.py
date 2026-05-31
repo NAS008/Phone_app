@@ -355,7 +355,7 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             "received_at_ms": _now_ms(),
             "text": text,
             "parts": [],
-            "video_url": "/api/video",
+            "video_url": f"/api/video?t={_now_ms()}",
         }
         self.server.message_store.add(message)
         self.send_json({"success": True, "kb": kb})

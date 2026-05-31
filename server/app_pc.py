@@ -210,7 +210,6 @@ async def main():
             return
 
         img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-        last_frames.append(cv2.resize(img_b, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA))
 
         start_img = frames[-1] if frames else img_a
         interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
@@ -393,6 +392,8 @@ async def main():
             frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
         else:
             frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
+
+        last_frames.append(cv2.resize(frame, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA))
 
         out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         cv2.imshow(config.APP_NAME, out)

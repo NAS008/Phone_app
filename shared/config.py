@@ -37,6 +37,9 @@ class Config:
     # UI
     POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
     
+    # Context
+    CONTEXT_SIZE = 20  # max conversation turns kept per session
+
     # Bus
     redis_host     = "tfnca-redis.redis.cache.windows.net"
     redis_port     = 6380

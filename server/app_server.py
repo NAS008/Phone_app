@@ -62,7 +62,6 @@ async def main():
     joined_users = set()
     session_histories = {}   # session_id -> list of {"role", "parts"} turns
     pending_parts = {}        # session_id -> image parts held across a follow-up turn
-    MAX_HISTORY_TURNS = 20
 
     async def on_session(session_id):
         nonlocal current_session_id, joined_users
@@ -149,8 +148,8 @@ async def main():
             history.append({"role": "user", "parts": user_text_parts})
 
         # Trim to keep only the most recent turns.
-        if len(history) > MAX_HISTORY_TURNS:
-            del history[: len(history) - MAX_HISTORY_TURNS]
+        if len(history) > config.CONTEXT_SIZE:
+            del history[: len(history) - config.CONTEXT_SIZE]
 
         if action == "ASK_FOLLOWUP":
             # Preserve image parts so the next reply still has the image in context.

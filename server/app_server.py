@@ -189,8 +189,8 @@ async def main():
 
             prompt_text = extract_first_text(effective_parts) or "an artistic scene"
             idx = random.randrange(len(config.MOTION_LORAS))
-            lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
-            loras = [(repo, lora_name, weight)] if repo else []
+            lora_name, weight, hint, repo, weight_file = config.MOTION_LORAS[idx]
+            loras = [(repo, lora_name, weight, weight_file)] if repo else []
             full_prompt = f"{prompt_text}, {hint}" if hint else prompt_text
             entry = {
                 "prompt": full_prompt,

@@ -198,6 +198,7 @@ class AnimateDiff:
         print("✓ AnimateDiff ready")
 
     def _load_loras(self, loras):
+        # loras: list of (repo_id, adapter_name, weight, weight_file)
         if self._active_loras:
             self.pipe.unload_lora_weights()
             self._active_loras = []
@@ -205,14 +206,14 @@ class AnimateDiff:
         if not loras:
             return
 
-        for repo_id, adapter_name, _ in loras:
-            self.pipe.load_lora_weights(repo_id, adapter_name=adapter_name)
+        for repo_id, adapter_name, _, weight_file in loras:
+            self.pipe.load_lora_weights(repo_id, weight_name=weight_file, adapter_name=adapter_name)
 
-        names   = [n for _, n, _ in loras]
-        weights = [w for _, _, w in loras]
+        names   = [n for _, n, _, _ in loras]
+        weights = [w for _, _, w, _ in loras]
         self.pipe.set_adapters(names, adapter_weights=weights)
         self._active_loras = loras
-        print(f"  [LoRA] active: { {n: w for _, n, w in loras} }", flush=True)
+        print(f"  [LoRA] active: { {n: w for _, n, w, _ in loras} }", flush=True)
 
     def _pil_to_bgr(self, img):
         return cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -221,11 +222,11 @@ class AnimateDiff:
         return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
     def generate_simple(self, subject, motion_lora_id, anchor, style="minimalist", negative="close-up, indoor, blurry, watermark, text"):
-        lora_name, weight, hint, repo = self.MOTION_LORAS[motion_lora_id]
+        lora_name, weight, hint, repo, weight_file = self.MOTION_LORAS[motion_lora_id]
 
         loras = []
         if repo is not None:
-            loras = [(repo, lora_name, weight)]
+            loras = [(repo, lora_name, weight, weight_file)]
 
         prompt = f"{subject}, {hint}, {style}"
         prompt = ", ".join(part for part in [subject, hint, style] if part)

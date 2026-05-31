@@ -80,7 +80,7 @@ async def main():
     session_histories = {}
     pending_parts = {}
     ai_mode = 0
-    last_generated_image_bgr = None
+    last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
 
@@ -134,7 +134,7 @@ async def main():
         joined_users.clear()
         session_histories.clear()
         pending_parts.clear()
-        last_generated_image_bgr = None
+        last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
         print(f"✓ Server: active session set to {current_session_id}")
 
     async def on_user_joined(session_id, nickname):
@@ -186,10 +186,6 @@ async def main():
                     anchor_bgr = last_generated_image_bgr
             else:
                 anchor_bgr = last_generated_image_bgr
-
-            if anchor_bgr is None:
-                await _publish_error(effective_session_id, "I need an image to animate. Please share one!", turn_id)
-                return
 
             prompt_text = extract_first_text(effective_parts) or "an artistic scene"
             idx = random.randrange(len(config.MOTION_LORAS))

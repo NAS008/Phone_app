@@ -1039,7 +1039,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
     if (!isGyroEnabled || !sessionId) {
       gyroTransportBlockedRef.current = false;
       lastSentGyroRef.current = null;
-      positionRef.current = { x: 0, y: 0, z: 0 };
+      positionRef.current = { x: 0.5, y: 0.5, z: 0 };
       velocityRef.current = { x: 0, y: 0, z: 0 };
       prevFrameDataRef.current = null;
       posLastTimeRef.current = 0;
@@ -1047,9 +1047,15 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
     }
 
     let cancelled = false;
-    const ACCEL_DEADBAND = 0.08;    // m/s² — filter sensor noise
     const STATIONARY_DIFF = 6;      // mean per-channel diff threshold (0–255 scale) for ZUPT
     const FRAME_W = 64, FRAME_H = 48;
+    // Tilt range (degrees) that maps to full-speed movement; smaller = more sensitive.
+    const TILT_RANGE = 30;
+    // Max pointer speed in normalized units per second at full tilt.
+    const MAX_SPEED = 0.8;
+
+    positionRef.current = { x: 0.5, y: 0.5, z: 0 };
+    velocityRef.current = { x: 0, y: 0, z: 0 };
 
     const offscreen = document.createElement("canvas");
     offscreen.width = FRAME_W;
@@ -1058,7 +1064,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
 
     posLastTimeRef.current = performance.now();
 
-    // 10 Hz — camera frame comparison + velocity integration
+    // 10 Hz — camera ZUPT + velocity integration
     const frameIntervalId = setInterval(() => {
       if (cancelled || !ctx) return;
 
@@ -1067,7 +1073,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
       const dt = Math.min((now - posLastTimeRef.current) / 1000, 0.1);
       posLastTimeRef.current = now;
 
-      // Camera ZUPT: compare consecutive frames when video is ready
+      // Camera ZUPT: compare consecutive frames; if stationary, kill velocity.
       let isStationary = false;
       if (video && video.readyState >= 2) {
         ctx.drawImage(video, 0, 0, FRAME_W, FRAME_H);
@@ -1079,24 +1085,30 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
         }
       }
 
-      // Map orientation angles to normalized [0,1] grid coords — no drift possible.
-      // gamma: tilt left/right −90°→+90°  →  x 0→1
-      // beta:  tilt back/forward −90°→+90° →  y 0→1 (tilting toward you moves pointer down)
       const { alpha, beta, gamma } = gyroDataRef.current;
-      const x = Math.max(0, Math.min(1, ((gamma ?? 0) + 90) / 180));
-      const y = Math.max(0, Math.min(1, (90 - (beta  ?? 0)) / 180));
 
       if (isStationary) {
-        positionRef.current = { x, y, z: 0 };
+        velocityRef.current = { x: 0, y: 0, z: 0 };
+        positionRef.current = { ...positionRef.current, z: 0 };
         return;
       }
+
+      // Tilt angle (clamped to ±TILT_RANGE) drives velocity, not position.
+      // gamma: tilt right → positive vx; beta: tilt toward you → positive vy.
+      const vx = Math.max(-1, Math.min(1, (gamma ?? 0) / TILT_RANGE)) * MAX_SPEED;
+      const vy = Math.max(-1, Math.min(1, (beta  ?? 0) / TILT_RANGE)) * MAX_SPEED;
+
+      const pos = positionRef.current;
+      positionRef.current = {
+        x: Math.max(0, Math.min(1, pos.x + vx * dt)),
+        y: Math.max(0, Math.min(1, pos.y + vy * dt)),
+        z: positionRef.current.z,
+      };
 
       // z = world-frame acceleration magnitude → drives vz force in sim
       const { x: ax, y: ay, z: az } = motionDataRef.current;
       const w = deviceToWorldAccel(ax, ay, az, alpha, beta, gamma);
-      const speed = Math.sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
-
-      positionRef.current = { x, y, z: speed };
+      positionRef.current.z = Math.sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
     }, 100);
 
     // 320 ms — transmit position to the bus

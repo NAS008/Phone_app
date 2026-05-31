@@ -96,16 +96,16 @@ class Config:
         "Cinematic style, photography, ultra detailed, black and white with some NY cabs orange."
     ]
     MOTION_LORAS = [
-        # (lora_name, weight, hint, repo, weight_file)
-        ("zoom-in",  0.80, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in",              "v2_lora_ZoomIn.ckpt"),
-        ("zoom-out", 0.80, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out",             "v2_lora_ZoomOut.ckpt"),
-        ("pan-left", 0.75, "drifting left",               "guoyww/animatediff-motion-lora-pan-left",             "v2_lora_PanLeft.ckpt"),
-        ("pan-right",0.75, "drifting right",              "guoyww/animatediff-motion-lora-pan-right",            "v2_lora_PanRight.ckpt"),
-        ("tilt-up",  0.75, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up",              "v2_lora_TiltUp.ckpt"),
-        ("tilt-down",0.50, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down",            "v2_lora_TiltDown.ckpt"),
-        ("roll-cw",  0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise",    "v2_lora_RollingClockwise.ckpt"),
-        ("roll-ccw", 0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise","v2_lora_RollingAntiClockwise.ckpt"),
-        (None,       None, "sways gently in the wind",    None,                                                   None),
+        # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
+        ("zoom-in",  0.80, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),
+        ("zoom-out", 0.80, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out"),
+        ("pan-left", 0.75, "drifting left",               "guoyww/animatediff-motion-lora-pan-left"),
+        ("pan-right",0.75, "drifting right",              "guoyww/animatediff-motion-lora-pan-right"),
+        ("tilt-up",  0.75, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up"),
+        ("tilt-down",0.50, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down"),
+        ("roll-cw",  0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
+        ("roll-ccw", 0.60, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
+        (None,       None, "sways gently in the wind",    None),
     ]
     SUBJECTS = [
         "colossal shell",

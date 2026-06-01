@@ -368,7 +368,14 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
   const [settingsSelfGenOn, setSettingsSelfGenOn] = useState(false);
   const [settingsStyleIndex, setSettingsStyleIndex] = useState(16);
-  const [styleNames, setStyleNames] = useState([]);
+  const [styleNames, setStyleNames] = useState([
+    "Botanical Lithograph", "Art Nouveau Engraving", "Deep-Sea Specimen", "Edo Woodblock",
+    "Medieval Manuscript", "Bauhaus Geometric", "Electron Microscope", "Cyanotype",
+    "Charred Woodblock", "Aztec Circuit", "Soviet Constructivist", "Alchemical Manuscript",
+    "Light Painting", "Laser-Etched Glass", "Pre-Columbian Textile", "Dutch Mezzotint",
+    "Islamic Geometric", "Alhambra Geometry", "Bauhaus Textile", "Kusama Infinity Dots",
+    "Inflated Textiles", "Cinematic B&W",
+  ]);
 
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);

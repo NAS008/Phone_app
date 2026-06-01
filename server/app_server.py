@@ -13,6 +13,7 @@
 # ✓ Add Gemini ai mode for image generation from text and/ or image and context
 # ✓ Add SD ai mode for image to image journey
 # ✓ Add AD ai mode for image motion journey
+# ✓ Add auto-gen mode (ai_mode=3): idle timer triggers story-driven generation loop
 
 import asyncio
 import concurrent.futures
@@ -81,13 +82,16 @@ async def main():
     session_histories = {}
     pending_parts = {}
     ai_mode = 0
-    self_gen_on = False
     last_user_parts = []
-    _self_gen_task = None
-    _self_gen_cancel = [False]
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
+
+    # Auto-gen state
+    _last_user_message_time = None  # set on first USER_MESSAGE
+    _auto_gen_task = None
+    _auto_gen_cancel = [False]
+    _pre_auto_gen_mode = 0  # ai_mode saved before entering auto-gen (mode 3)
 
     def get_sd():
         nonlocal _sd
@@ -123,46 +127,70 @@ async def main():
             )
         return _ad
 
-    async def run_self_gen_loop(cancel):
+    # ── Auto-generation loop (ai_mode == 3) ──────────────────────────────────
+    # Driven by idle timer. Generates story-based prompts, creates Gemini images,
+    # runs SD journeys between them, and publishes each frame to PC + phone.
+    # Every 5 cycles the style is rotated through Config.STYLE.
+
+    async def run_auto_gen_loop(cancel):
         nonlocal last_generated_image_bgr
         session_id = current_session_id or config.ADMIN_SESSION_ID
-        try:
-            parts_snapshot = list(last_user_parts)
-            prompts = await loop.run_in_executor(
-                executor, lambda: gemini.generate_story_prompts(parts_snapshot)
-            )
-            if not prompts:
-                print("✗ Server: self-gen produced no prompts")
-                return
-            idx = 0
-            while not cancel[0]:
-                prompt = prompts[idx % len(prompts)]
-                print(f"✓ Server: self-gen [{idx + 1}/{len(prompts)}] — {prompt}")
+        style_values = list(config.STYLE.values())
+        cycle = 0
+        prompts = []
 
+        try:
+            while not cancel[0]:
+                # Rotate style every 5 cycles
+                if cycle % 5 == 0:
+                    gemini.STYLE = random.choice(style_values)
+                    print(f"✓ Server: auto-gen cycle {cycle} — style rotated")
+
+                # Refresh story prompts when the batch is exhausted (or on first run)
+                if not prompts or (cycle > 0 and cycle % len(prompts) == 0):
+                    parts_snapshot = list(last_user_parts)
+                    try:
+                        prompts = await loop.run_in_executor(
+                            executor, lambda: gemini.generate_story_prompts(parts_snapshot)
+                        )
+                    except Exception as e:
+                        print(f"✗ Server: auto-gen story prompts failed: {e}")
+                        await asyncio.sleep(5)
+                        continue
+                    if not prompts:
+                        print("✗ Server: auto-gen produced no prompts")
+                        await asyncio.sleep(5)
+                        continue
+
+                prompt = prompts[cycle % len(prompts)]
+                print(f"✓ Server: auto-gen [{cycle + 1}] — {prompt}")
+
+                # 1. Generate Gemini image from prompt + current style
                 try:
                     image_bytes = await loop.run_in_executor(
                         executor,
                         lambda p=prompt: gemini.generate_image(p + " " + gemini.STYLE),
                     )
                 except GeminiBlockedError as e:
-                    print(f"✗ Server: self-gen blocked ({e.reason}): {e.user_message}")
-                    idx = (idx + 1) % len(prompts)
+                    print(f"✗ Server: auto-gen blocked ({e.reason}): {e.user_message}")
+                    cycle += 1
                     continue
                 except Exception as e:
-                    print(f"✗ Server: self-gen image failed: {e}")
-                    idx = (idx + 1) % len(prompts)
+                    print(f"✗ Server: auto-gen image failed: {e}")
+                    cycle += 1
                     continue
 
                 if not image_bytes or cancel[0]:
-                    idx = (idx + 1) % len(prompts)
+                    cycle += 1
                     continue
 
                 new_bgr = jpeg_to_bgr(image_bytes)
                 if new_bgr is None:
-                    idx = (idx + 1) % len(prompts)
+                    cycle += 1
                     continue
                 new_bgr = cv2.resize(new_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
 
+                # 2. SD journey from last image to new image, streaming frames to PC
                 prev_bgr = last_generated_image_bgr
                 q = asyncio.Queue()
 
@@ -173,7 +201,7 @@ async def main():
                                 break
                             loop.call_soon_threadsafe(q.put_nowait, frame)
                     except Exception as exc:
-                        print(f"✗ Server: self-gen SD failed: {exc}")
+                        print(f"✗ Server: auto-gen SD failed: {exc}")
                     finally:
                         loop.call_soon_threadsafe(q.put_nowait, None)
 
@@ -189,6 +217,7 @@ async def main():
                         image_purpose="output",
                     )
 
+                # 3. Publish final image to phone and update last frame
                 if not cancel[0]:
                     last_generated_image_bgr = new_bgr
                     await bus.publish_ai_message_to_phone(
@@ -198,23 +227,43 @@ async def main():
                         image_purpose="output",
                     )
 
-                idx = (idx + 1) % len(prompts)
+                cycle += 1
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"✗ Server: self-gen loop crashed: {e}")
+            print(f"✗ Server: auto-gen loop crashed: {e}")
 
-    def start_self_gen():
-        nonlocal _self_gen_task, _self_gen_cancel
-        _self_gen_cancel[0] = True
-        if _self_gen_task and not _self_gen_task.done():
-            _self_gen_task.cancel()
-        _self_gen_cancel = [False]
-        if last_user_parts:
-            _self_gen_task = asyncio.create_task(run_self_gen_loop(_self_gen_cancel))
-        else:
-            print("✗ Server: self-gen enabled but no user message yet")
+    def start_auto_gen():
+        nonlocal _auto_gen_task, _auto_gen_cancel
+        _auto_gen_cancel[0] = True
+        if _auto_gen_task and not _auto_gen_task.done():
+            _auto_gen_task.cancel()
+        _auto_gen_cancel = [False]
+        _auto_gen_task = asyncio.create_task(run_auto_gen_loop(_auto_gen_cancel))
+
+    def stop_auto_gen():
+        nonlocal _auto_gen_cancel
+        _auto_gen_cancel[0] = True
+        if _auto_gen_task and not _auto_gen_task.done():
+            _auto_gen_task.cancel()
+
+    async def idle_watcher():
+        nonlocal ai_mode, _pre_auto_gen_mode, _last_user_message_time
+        while True:
+            await asyncio.sleep(5)
+            if ai_mode == 3:
+                continue
+            if not last_user_parts or _last_user_message_time is None:
+                continue
+            elapsed = loop.time() - _last_user_message_time
+            if elapsed >= config.AUTO_GEN_IDLE_SECONDS:
+                print(f"✓ Server: idle {elapsed:.0f}s → entering auto-gen (ai_mode=3)")
+                _pre_auto_gen_mode = ai_mode
+                ai_mode = 3
+                start_auto_gen()
+
+    # ── Event handlers ────────────────────────────────────────────────────────
 
     async def _publish_error(session_id, text, turn_id):
         await bus.publish_ai_message_to_pc(
@@ -245,7 +294,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_user_parts
+        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_user_parts, _last_user_message_time
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -268,10 +317,13 @@ async def main():
         turn_id = payload.get("turn_id")
 
         last_user_parts = list(effective_parts)
+        _last_user_message_time = loop.time()
 
-        if self_gen_on:
-            start_self_gen()
-            return
+        # Exit auto-gen on any user message, restore previous mode
+        if ai_mode == 3:
+            stop_auto_gen()
+            ai_mode = _pre_auto_gen_mode
+            print(f"✓ Server: user message received → exiting auto-gen, restoring ai_mode={ai_mode}")
 
         # ── Mode 2: AnimateDiff ──────────────────────────────────────────────
         if ai_mode == 2:
@@ -436,7 +488,7 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode, self_gen_on
+        nonlocal current_session_id, ai_mode
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
         if "mode" in params:
@@ -448,20 +500,13 @@ async def main():
             if 0 <= idx < len(style_values):
                 gemini.STYLE = style_values[idx]
                 print(f"✓ Server: style set to index {idx} ({list(config.STYLE.keys())[idx]})")
-        if "self_gen_on" in params:
-            self_gen_on = bool(params["self_gen_on"])
-            print(f"✓ Server: self_gen_on={self_gen_on}")
-            if self_gen_on:
-                start_self_gen()
-            else:
-                _self_gen_cancel[0] = True
-                if _self_gen_task and not _self_gen_task.done():
-                    _self_gen_task.cancel()
 
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)
     bus.on(Bus.USER_MESSAGE, on_user_message)
     bus.on(Bus.SETTINGS, on_settings)
+
+    asyncio.create_task(idle_watcher())
 
     while True:
         await bus.poll()

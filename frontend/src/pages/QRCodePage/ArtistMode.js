@@ -366,16 +366,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
-  const [settingsSelfGenOn, setSettingsSelfGenOn] = useState(false);
-  const [settingsStyleIndex, setSettingsStyleIndex] = useState(16);
-  const [styleNames, setStyleNames] = useState([
-    "Botanical Lithograph", "Art Nouveau Engraving", "Deep-Sea Specimen", "Edo Woodblock",
-    "Medieval Manuscript", "Bauhaus Geometric", "Electron Microscope", "Cyanotype",
-    "Charred Woodblock", "Aztec Circuit", "Soviet Constructivist", "Alchemical Manuscript",
-    "Light Painting", "Laser-Etched Glass", "Pre-Columbian Textile", "Dutch Mezzotint",
-    "Islamic Geometric", "Alhambra Geometry", "Bauhaus Textile", "Kusama Infinity Dots",
-    "Inflated Textiles", "Cinematic B&W",
-  ]);
 
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -430,12 +420,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
     }
   }, [flashNotice, nickname, sessionId]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    MessageBusService.fetchStyles().then(setStyleNames);
-  }, [isAdmin]);
-
-  const appendFeed = useCallback((message) => {
+const appendFeed = useCallback((message) => {
     setFeed((current) => [...current, message]);
   }, []);
 
@@ -1401,25 +1386,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
           <div className="settings-inner">
             <div className="settings-section">
               <div className="settings-row">
-                <span className="settings-label">Style</span>
-              </div>
-              <select
-                className="settings-select"
-                value={settingsStyleIndex}
-                onChange={(e) => {
-                  const idx = parseInt(e.target.value, 10);
-                  setSettingsStyleIndex(idx);
-                  sendSetting("style_index", idx);
-                }}
-              >
-                {styleNames.map((name, i) => (
-                  <option key={i} value={i}>{name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="settings-section">
-              <div className="settings-row">
                 <span className="settings-label">AI Mode</span>
                 <span className="settings-value">{settingsMode}</span>
               </div>
@@ -1526,22 +1492,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
               </button>
             </div>
 
-            <div className="settings-section settings-row">
-              <span className="settings-label">Self Generation</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settingsSelfGenOn}
-                className={`settings-toggle${settingsSelfGenOn ? " on" : ""}`}
-                onClick={() => {
-                  const next = !settingsSelfGenOn;
-                  setSettingsSelfGenOn(next);
-                  sendSetting("self_gen_on", next);
-                }}
-              >
-                <span className="settings-toggle__thumb" />
-              </button>
-            </div>
           </div>
         </section>
       )}

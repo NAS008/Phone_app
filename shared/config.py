@@ -40,6 +40,9 @@ class Config:
     # Context
     CONTEXT_SIZE = 20  # max conversation turns kept per session
 
+    # Auto-generation
+    AUTO_GEN_IDLE_SECONDS = 120  # seconds of user inactivity before auto-gen kicks in
+
     # Phone backend (for direct HTTP uploads that bypass the bus)
     PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
 

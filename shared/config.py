@@ -42,6 +42,7 @@ class Config:
 
     # Auto-generation
     AUTO_GEN_IDLE_SECONDS = 30  # seconds of user inactivity before auto-gen kicks in
+    AUTO_GEN_MAX_QUEUE_FRAMES = 120  # pause generation when PC display queue exceeds this
 
     # Phone backend (for direct HTTP uploads that bypass the bus)
     PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
@@ -129,6 +130,21 @@ class Config:
         "New Year":               "SCENE: Transform *MAIN SUBJECTS* in [Image] into persons standing in center of canvas holding a crystal champagne flute, surrounded by explosive splatter patterns of gold leaf fragments, champagne spray, and liquid gold paint flung across the composition. Create a Jackson Pollock-style Abstract Expressionist action painting. Energetic gestural marks and drips. Chaotic overlapping metallics - gold, bronze, copper - mixed with deep blacks and rich burgundy. Large-scale canvas feeling. Raw, spontaneous luxury aesthetic. *MAIN SUBJECTS* FACES: Preserve original facial proportions, bone structure, and identity. You may freely modify bodies, poses, clothing, hairstyles, background, and all other elements to fit the scene perfectly. Maintain realistic lighting and shadows that match the scene. Ensure enhancements look natural and photorealistic. ADD ELEMENTS: Add elements from {transcript}. Dress in elegant black formal attire (tuxedo or evening gown) with gold paint splatters creating striking contrast. Add crystal champagne flute held at chest level with champagne mid-spray creating dramatic arc. Add bottle of Dom Pérignon in other hand tilted, pouring champagne into the chaos. Add confident, celebratory artistic expression. Add gold leaf sheets floating and fragmenting throughout composition like confetti. Add liquid gold and champagne drips running down face and clothing. Add scattered pearl necklace breaking apart with pearls embedded in paint splatters. Add dynamic powerful stance with champagne pooling at feet.",
         "Rembrandt selfie stick": "SCENE: Transform *MAIN SUBJECTS* in [Image] into persons in center of wealthy merchant group painting, all formally posed in dark interior with dramatic window light, but person is holding a modern selfie stick extended toward viewer. Create a Rembrandt-style Dutch Golden Age group portrait. Chiaroscuro lighting with dark background and illuminated faces. Rich blacks and warm golden highlights. Classical Dutch interior with map on wall. *MAIN SUBJECTS* FACES: Preserve original facial proportions, bone structure, and identity. You may freely modify bodies, poses, clothing, hairstyles, background, and all other elements to fit the scene perfectly. Maintain realistic lighting and shadows that match the scene. Ensure enhancements look natural and photorealistic. ADD ELEMENTS: Add elements from {transcript}. Dress in 17th century Dutch merchant clothing (black doublet with white lace collar, black hat with feather). Add elaborate ruff collar. Add serious, dignified expression typical of Dutch portraits. Add modern smartphone on extended selfie stick held prominently with screen glowing. Add other period-dressed figures arranged formally behind looking confused at device. Add dramatic Rembrandt lighting from window highlighting face and selfie stick.",        
     }
+    AD_STYLE = [
+        "by Van Gogh, inpasto strokes"
+        "by Theo Jansenvery, kinetic machines"
+        "by Mario Giacomelli, black and white"
+        "by Karl Blossfeldt, botanical photography"
+        "by Hiroshi Sugimoto, minimalist polarized color"        
+        "by Ellsworth Kelly, vibrant color field minimalism" # Vivid, saturated color blocks with sharp geometric shapes
+        "by Edward Hopper, minimal color composition" # Earthy, rich cinematic tones with isolated subjects and heavy shadows
+        "by James Turrell, minimalist neon light art" # Pastel gradients, soft light, and vast atmospheric negative space
+        "by Giorgio Morandi, muted color still life minimalism" # Chalky, muted, monochromatic pastel palettes with rough textures
+        "by Lewis Baltz, new topographics color photography" # Dusty desert tones, high exposure, and sharp architectural shadows
+        "by Georgia O'Keeffe, minimalist abstract color" # Deep indigo blues, whites, and serene organic compositions
+        "by Patrick Caulfield, graphic minimalism color" # High-contrast pop color blocks with bold, clean outlines
+        "by Michael Kenna, minimal color photography" # Foggy, soft focus, desaturated melancholic tones with isolated subjects
+    ]
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
         ("zoom-in",  0.8, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),

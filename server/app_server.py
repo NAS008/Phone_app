@@ -87,12 +87,14 @@ async def main():
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
+    ad_style = config.AD_STYLE[4]
 
     # Auto-gen state
     _last_user_message_time = None  # set on first USER_MESSAGE
     _auto_gen_task = None
     _auto_gen_cancel = [False]
     _pre_auto_gen_mode = 0  # ai_mode saved before entering auto-gen (mode 3)
+    _pc_queue_size = 0
 
     def get_sd():
         nonlocal _sd
@@ -212,11 +214,16 @@ async def main():
                     frame = await q.get()
                     if frame is None:
                         break
+                    while _pc_queue_size > config.AUTO_GEN_MAX_QUEUE_FRAMES and not cancel[0]:
+                        await asyncio.sleep(0.5)
+                    if cancel[0]:
+                        break
                     await bus.publish_ai_message_to_pc(
                         session_id=session_id, nickname="NonCarbon Artist",
                         image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
                         image_purpose="output",
                     )
+                    await asyncio.sleep(0)
 
                 # 3. Publish final image to phone and update last frame
                 if not cancel[0]:
@@ -242,7 +249,7 @@ async def main():
     # AnimateDiff animates them from the last rendered frame.
 
     async def run_auto_gen_animatediff_loop(cancel):
-        nonlocal last_generated_image_bgr
+        nonlocal last_generated_image_bgr, ad_style
         session_id = current_session_id or config.ADMIN_SESSION_ID
         cycle = 0
         subjects = []
@@ -268,7 +275,7 @@ async def main():
                 idx = random.randrange(len(config.MOTION_LORAS))
                 lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
                 loras = [(repo, lora_name, weight)] if repo else []
-                full_prompt = f"{subject}, {hint}" if hint else subject
+                full_prompt = f"{subject}, {hint}, {ad_style}" if hint else subject
                 entry = {
                     "prompt": full_prompt,
                     "negative": "close-up, indoor, blurry, watermark, text",
@@ -293,11 +300,16 @@ async def main():
                 for pil_frame in frames:
                     if cancel[0]:
                         break
+                    while _pc_queue_size > config.AUTO_GEN_MAX_QUEUE_FRAMES and not cancel[0]:
+                        await asyncio.sleep(0.5)
+                    if cancel[0]:
+                        break
                     await bus.publish_ai_message_to_pc(
                         session_id=session_id, nickname="NonCarbon Artist",
                         image_bytes=bgr_to_jpeg(pil_to_bgr(pil_frame)), image_mime_type="image/jpeg",
                         image_purpose="output",
                     )
+                    await asyncio.sleep(0)
 
                 last_frame_bgr = pil_to_bgr(frames[-1])
                 last_generated_image_bgr = last_frame_bgr
@@ -395,7 +407,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_user_parts, _last_user_message_time
+        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_user_parts, _last_user_message_time, ad_style
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -451,7 +463,7 @@ async def main():
             idx = random.randrange(len(config.MOTION_LORAS))
             lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
             loras = [(repo, lora_name, weight)] if repo else []
-            full_prompt = f"{prompt_text}, {hint}" if hint else prompt_text
+            full_prompt = f"{prompt_text}, {hint}, {ad_style}" if hint else prompt_text
             entry = {
                 "prompt": full_prompt,
                 "negative": "close-up, indoor, blurry, watermark, text",
@@ -592,9 +604,11 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode
+        nonlocal current_session_id, ai_mode, _pc_queue_size
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
+        if "pc_queue_size" in params:
+            _pc_queue_size = int(params["pc_queue_size"])
         if "mode" in params:
             ai_mode = int(params["mode"])
             print(f"✓ Server: ai_mode set to {ai_mode}")

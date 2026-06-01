@@ -276,6 +276,7 @@ async def main():
         img_a = img_b
 
         print(f"✓ PC: appended {added} frames, queue size is now {len(frames)} at {config.FPS} FPS")
+        await bus.publish_settings(pc_queue_size=len(frames))
 
     async def on_user_like(session_id, nickname):
         nonlocal frame

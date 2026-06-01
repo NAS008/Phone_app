@@ -14,6 +14,7 @@
 # ✓ Add SD ai mode for image to image journey
 # ✓ Add AD ai mode for image motion journey
 # ✓ Add auto-gen mode (ai_mode=3): idle timer triggers story-driven generation loop
+# ✓ Add AnimateDiff auto-gen mode (ai_mode=4): idle timer triggers AnimateDiff loop when in mode 2
 
 import asyncio
 import concurrent.futures
@@ -220,10 +221,11 @@ async def main():
                 # 3. Publish final image to phone and update last frame
                 if not cancel[0]:
                     last_generated_image_bgr = new_bgr
-                    await bus.publish_ai_message_to_phone(
-                        session_id=session_id, nickname="NonCarbon Artist",
+                    await _pub_phone(
+                        session_id,
                         text=f"[{cycle + 1}] {prompt}",
-                        image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                        image_bytes=bgr_to_jpeg(new_bgr),
+                        image_mime_type="image/jpeg",
                         image_purpose="output",
                     )
 
@@ -234,13 +236,98 @@ async def main():
         except Exception as e:
             print(f"✗ Server: auto-gen loop crashed: {e}")
 
+    # ── AnimateDiff auto-generation loop (ai_mode == 4) ─────────────────────────
+    # Triggered by idle timer when pre-mode was 2 (AnimateDiff).
+    # Gemini generates short subjects (< 75 tokens, no style bloat),
+    # AnimateDiff animates them from the last rendered frame.
+
+    async def run_auto_gen_animatediff_loop(cancel):
+        nonlocal last_generated_image_bgr
+        session_id = current_session_id or config.ADMIN_SESSION_ID
+        cycle = 0
+        subjects = []
+
+        try:
+            while not cancel[0]:
+                if not subjects or (cycle > 0 and cycle % len(subjects) == 0):
+                    parts_snapshot = list(last_user_parts)
+                    try:
+                        subjects = await loop.run_in_executor(
+                            executor, lambda: gemini.generate_animatediff_subjects(parts_snapshot)
+                        )
+                    except Exception as e:
+                        print(f"✗ Server: auto-gen AD subjects failed: {e}")
+                        await asyncio.sleep(5)
+                        continue
+                    if not subjects:
+                        print("✗ Server: auto-gen AD produced no subjects")
+                        await asyncio.sleep(5)
+                        continue
+
+                subject = subjects[cycle % len(subjects)]
+                idx = random.randrange(len(config.MOTION_LORAS))
+                lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
+                loras = [(repo, lora_name, weight)] if repo else []
+                full_prompt = f"{subject}, {hint}" if hint else subject
+                entry = {
+                    "prompt": full_prompt,
+                    "negative": "close-up, indoor, blurry, watermark, text",
+                    "loras": loras,
+                }
+                anchor_pil = bgr_to_pil(last_generated_image_bgr)
+                print(f"✓ Server: auto-gen AD [{cycle + 1}] — {full_prompt}")
+
+                try:
+                    frames = await loop.run_in_executor(
+                        executor, lambda e=entry, a=anchor_pil: get_ad().generate(e, a)
+                    )
+                except Exception as e:
+                    print(f"✗ Server: auto-gen AD failed: {e}")
+                    cycle += 1
+                    continue
+
+                if cancel[0] or not frames:
+                    cycle += 1
+                    continue
+
+                for pil_frame in frames:
+                    if cancel[0]:
+                        break
+                    await bus.publish_ai_message_to_pc(
+                        session_id=session_id, nickname="NonCarbon Artist",
+                        image_bytes=bgr_to_jpeg(pil_to_bgr(pil_frame)), image_mime_type="image/jpeg",
+                        image_purpose="output",
+                    )
+
+                last_frame_bgr = pil_to_bgr(frames[-1])
+                last_generated_image_bgr = last_frame_bgr
+
+                if not cancel[0]:
+                    await _pub_phone(
+                        session_id,
+                        text=f"[{cycle + 1}] {subject}",
+                        image_bytes=bgr_to_jpeg(last_frame_bgr),
+                        image_mime_type="image/jpeg",
+                        image_purpose="output",
+                    )
+
+                cycle += 1
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"✗ Server: auto-gen AD loop crashed: {e}")
+
     def start_auto_gen():
         nonlocal _auto_gen_task, _auto_gen_cancel
         _auto_gen_cancel[0] = True
         if _auto_gen_task and not _auto_gen_task.done():
             _auto_gen_task.cancel()
         _auto_gen_cancel = [False]
-        _auto_gen_task = asyncio.create_task(run_auto_gen_loop(_auto_gen_cancel))
+        if ai_mode == 4:
+            _auto_gen_task = asyncio.create_task(run_auto_gen_animatediff_loop(_auto_gen_cancel))
+        else:
+            _auto_gen_task = asyncio.create_task(run_auto_gen_loop(_auto_gen_cancel))
 
     def stop_auto_gen():
         nonlocal _auto_gen_cancel
@@ -248,24 +335,33 @@ async def main():
         if _auto_gen_task and not _auto_gen_task.done():
             _auto_gen_task.cancel()
 
+    async def _pub_phone(session_id, **kwargs):
+        """Publish to both the current QR session and the admin session so both see the message."""
+        await bus.publish_ai_message_to_phone(session_id=session_id, nickname="NonCarbon Artist", **kwargs)
+        if session_id != config.ADMIN_SESSION_ID:
+            await bus.publish_ai_message_to_phone(session_id=config.ADMIN_SESSION_ID, nickname="NonCarbon Artist", **kwargs)
+
     async def idle_watcher():
         nonlocal ai_mode, _pre_auto_gen_mode, _last_user_message_time
         while True:
             await asyncio.sleep(5)
-            if ai_mode == 3:
+            if ai_mode in (3, 4):
                 continue
             if not last_user_parts or _last_user_message_time is None:
                 continue
             elapsed = loop.time() - _last_user_message_time
             if elapsed >= config.AUTO_GEN_IDLE_SECONDS:
-                print(f"✓ Server: idle {elapsed:.0f}s → entering auto-gen (ai_mode=3)")
                 _pre_auto_gen_mode = ai_mode
-                ai_mode = 3
                 session_id = current_session_id or config.ADMIN_SESSION_ID
-                await bus.publish_ai_message_to_phone(
-                    session_id=session_id, nickname="NonCarbon Artist",
-                    text="Auto-generation loop started — watch the art flow",
-                )
+                if _pre_auto_gen_mode == 2:
+                    ai_mode = 4
+                    print(f"✓ Server: idle {elapsed:.0f}s → entering auto-gen AnimateDiff (ai_mode=4)")
+                    notice = "Auto-generation (AnimateDiff) loop started — watch the art flow"
+                else:
+                    ai_mode = 3
+                    print(f"✓ Server: idle {elapsed:.0f}s → entering auto-gen (ai_mode=3)")
+                    notice = "Auto-generation loop started — watch the art flow"
+                await _pub_phone(session_id, text=notice)
                 start_auto_gen()
 
     # ── Event handlers ────────────────────────────────────────────────────────
@@ -328,7 +424,7 @@ async def main():
         _last_user_message_time = loop.time()
 
         # Exit auto-gen on any user message, restore previous mode
-        if ai_mode == 3:
+        if ai_mode in (3, 4):
             stop_auto_gen()
             ai_mode = _pre_auto_gen_mode
             print(f"✓ Server: user message received → exiting auto-gen, restoring ai_mode={ai_mode}")

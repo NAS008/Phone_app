@@ -286,6 +286,42 @@ class Gemini:
         print(f"✓ Gemini: {len(prompts)} self-gen prompts")
         return prompts
 
+    def generate_animatediff_subjects(self, parts: List[Dict[str, Any]]) -> List[str]:
+        """Generate short AnimateDiff subject prompts from user context. Each under 75 tokens."""
+        import json
+        sdk_parts = self._bus_parts_to_sdk_parts(parts)
+        if not sdk_parts:
+            sdk_parts = [types.Part(text="something beautiful and mysterious")]
+
+        instruction = (
+            "You are a visual storyteller creating prompts for AnimateDiff, a video generation model.\n"
+            "The user has shared something with you. Generate exactly 8 distinct short subject prompts "
+            "inspired by it, each describing a single clear visual scene.\n"
+            "Rules: each prompt must be under 75 tokens total, one strong visual subject, "
+            "minimalist in character, no style keywords, no artistic movement names, "
+            "no camera or lens terms, no complex descriptors.\n"
+            "Return strict JSON only:\n"
+            "{\"prompts\": [\"prompt1\", ..., \"prompt8\"]}"
+        )
+
+        response = self.client.models.generate_content(
+            model=self.TEXT_MODEL,
+            contents=[types.Content(role="user", parts=sdk_parts)],
+            config=types.GenerateContentConfig(
+                system_instruction=instruction,
+                response_mime_type="application/json",
+            ),
+        )
+
+        text = self._extract_text(response)
+        if not text:
+            raise ValueError("empty animatediff subjects response")
+
+        data = json.loads(text)
+        prompts = [p.strip() for p in (data.get("prompts") or []) if isinstance(p, str) and p.strip()][:8]
+        print(f"✓ Gemini: {len(prompts)} AnimateDiff subjects generated")
+        return prompts
+
     # def describe_image(self, image_path: str, instruction: str) -> str:
     #     """Image + text prompt → text response (no image output)."""
     #     try:

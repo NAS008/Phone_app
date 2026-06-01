@@ -261,6 +261,11 @@ async def main():
                 print(f"✓ Server: idle {elapsed:.0f}s → entering auto-gen (ai_mode=3)")
                 _pre_auto_gen_mode = ai_mode
                 ai_mode = 3
+                session_id = current_session_id or config.ADMIN_SESSION_ID
+                await bus.publish_ai_message_to_phone(
+                    session_id=session_id, nickname="NonCarbon Artist",
+                    text="auto_generating",
+                )
                 start_auto_gen()
 
     # ── Event handlers ────────────────────────────────────────────────────────

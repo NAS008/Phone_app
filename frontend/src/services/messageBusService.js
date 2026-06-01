@@ -114,6 +114,17 @@ class MessageBusService {
    * filtering (where server time < client Date.now() hides all messages).
    * Falls back to Date.now() on any error.
    */
+  async fetchStyles() {
+    try {
+      const response = await fetch(`${this.apiUrl}/api/styles`);
+      if (!response.ok) return [];
+      const { names } = await response.json();
+      return names || [];
+    } catch {
+      return [];
+    }
+  }
+
   async fetchServerTime() {
     try {
       const response = await fetch(`${this.apiUrl}/api/server_time`);

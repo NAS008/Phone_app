@@ -73,7 +73,7 @@ async def main():
         GEMINI_API_KEY=config.GEMINI_API_KEY,
         TEXT_MODEL=config.GEMINI_TEXT_MODEL,
         IMAGE_MODEL=config.GEMINI_IMAGE_MODEL,
-        STYLE = config.STYLE[16],
+        STYLE = list(config.STYLE.values())[16],
     )
 
     current_session_id = ""
@@ -444,9 +444,10 @@ async def main():
             print(f"✓ Server: ai_mode set to {ai_mode}")
         if "style_index" in params:
             idx = int(params["style_index"])
-            if 0 <= idx < len(config.STYLE):
-                gemini.STYLE = config.STYLE[idx]
-                print(f"✓ Server: style set to index {idx}")
+            style_values = list(config.STYLE.values())
+            if 0 <= idx < len(style_values):
+                gemini.STYLE = style_values[idx]
+                print(f"✓ Server: style set to index {idx} ({list(config.STYLE.keys())[idx]})")
         if "self_gen_on" in params:
             self_gen_on = bool(params["self_gen_on"])
             print(f"✓ Server: self_gen_on={self_gen_on}")

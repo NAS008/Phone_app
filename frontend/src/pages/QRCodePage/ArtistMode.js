@@ -132,31 +132,6 @@ const RECEIVED_ACKNOWLEDGMENTS = [
 const pickAcknowledgment = () =>
   RECEIVED_ACKNOWLEDGMENTS[Math.floor(Math.random() * RECEIVED_ACKNOWLEDGMENTS.length)];
 
-const STYLE_NAMES = [
-  "Botanical Lithograph",
-  "Art Nouveau Engraving",
-  "Deep-Sea Specimen",
-  "Edo Woodblock",
-  "Medieval Manuscript",
-  "Bauhaus Geometric",
-  "Electron Microscope",
-  "Cyanotype",
-  "Charred Woodblock",
-  "Aztec Circuit",
-  "Soviet Constructivist",
-  "Alchemical Manuscript",
-  "Light Painting",
-  "Laser-Etched Glass",
-  "Pre-Columbian Textile",
-  "Dutch Mezzotint",
-  "Islamic Geometric",
-  "Alhambra Geometry",
-  "Bauhaus Textile",
-  "Kusama Infinity Dots",
-  "Inflated Textiles",
-  "Cinematic B&W",
-];
-
 const INTRO_TYPING_INTERVAL = 42;
 const INTRO_TYPING_TARGET = 70;
 const INTRO_MESSAGE_GAP = 620;
@@ -393,6 +368,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
   const [settingsSelfGenOn, setSettingsSelfGenOn] = useState(false);
   const [settingsStyleIndex, setSettingsStyleIndex] = useState(16);
+  const [styleNames, setStyleNames] = useState([]);
 
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -446,6 +422,11 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
       flashNotice("error", "Setting failed to send.");
     }
   }, [flashNotice, nickname, sessionId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    MessageBusService.fetchStyles().then(setStyleNames);
+  }, [isAdmin]);
 
   const appendFeed = useCallback((message) => {
     setFeed((current) => [...current, message]);
@@ -1549,7 +1530,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
                   sendSetting("style_index", idx);
                 }}
               >
-                {STYLE_NAMES.map((name, i) => (
+                {styleNames.map((name, i) => (
                   <option key={i} value={i}>{name}</option>
                 ))}
               </select>

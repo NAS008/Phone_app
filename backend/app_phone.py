@@ -244,6 +244,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(gif_data)
             return
 
+        if parsed.path == "/api/styles":
+            self.send_json({"names": list(Config.STYLE.keys())})
+            return
+
         if parsed.path == "/health":
             self.send_json({"success": True, "status": "ok"})
             return

@@ -74,30 +74,30 @@ class Config:
     # Optical flow
     OF_FRAMES = 24
 
-    STYLE = [
-        "In style of high-detail vintage botanical lithograph. Pale salmon, dusty rose, and muted sage green, solid black background.",
-        "In the style of Art Nouveau metal engraving. Burnished gold, ivory, and deep amber filigree on a solid black background.",
-        "In the style of deep-sea scientific specimen illustration. Glowing cyan, electric violet, and phosphorescent mint on a solid black background.",
-        "In the style of Edo-period Japanese woodblock print. Vermillion, indigo, and aged cream on a solid black background.",
-        "In the style of a medieval illuminated manuscript. Ultramarine blue, burnished gold leaf, and crimson on a solid black background.",
-        "In the style of Bauhaus geometric abstraction. Pure red, white, and yellow primary forms on a solid black background.",
-        "In the style of electron microscope scanning photography. Monochromatic silver, platinum, and graphite on solid black.",
-        "In the style of cyanotype photogram. Prussian blue and white silhouettes on solid black.",
-        "In the style of charred woodblock relief print. Burnt sienna, ash white, and ember orange on solid black.",
-        "In the style of Aztec codex fused with circuit board diagrams. Jade green, obsidian, and blood red on solid black.",
-        "In the style of Soviet Constructivist propaganda poster fused with biological anatomy. Stark red, steel grey, and bone white on solid black.",
-        "In the style of alchemical manuscript illustration. Oxidized copper green, tarnished silver, and sulfur yellow on solid black.",
-        "In the style of long-exposure light painting photography. Neon magenta, electric blue, and molten gold trails on solid black.",
-        "In the style of laser-etched glass engraving. Pure white and ice blue refraction lines on solid black.",
-        "In the style of pre-Columbian textile weaving translated to illustration. Terracotta, turquoise, and maize yellow geometric motifs on solid black.",
-        "In the style of 17th century Dutch Golden Age mezzotint. Rich velvety blacks, silver-white highlights, and deep sepia mid-tones on solid black.",
-        "In the style of Islamic geometric tilework translated to fine ink illustration. Deep lapis lazuli, burnished copper, and ivory white on solid black background.",
-        "In the style of modern architectural interpretation of Alhambra palace geometry. Rose gold, matte silver, and warm white on solid black.",
-        "In the style of Bauhaus textile weave translated to fine illustration. Strict alternating black and white rectangular block. Metallic gold threads run diagonally like wires of light stitched through woven darkness. Black background.",
-        "In the style of Japanese Yayoi Kusama infinity dot obsession. Dense overlapping white polka dot fields with fine 24-karat gold thread outlines tracing the edges of each circle on solid black background.",
-        "In the style of haute couture inflated textiles. Ivory silk organza fabric printed with perfect black polka dots, dramatically puffed into sculptural balloon-like volumes against solid black.",
-        "Cinematic style, photography, ultra detailed, black and white with some NY cabs orange."
-    ]
+    STYLE = {
+        "Botanical Lithograph":   "In style of high-detail vintage botanical lithograph. Pale salmon, dusty rose, and muted sage green, solid black background.",
+        "Art Nouveau Engraving":  "In the style of Art Nouveau metal engraving. Burnished gold, ivory, and deep amber filigree on a solid black background.",
+        "Deep-Sea Specimen":      "In the style of deep-sea scientific specimen illustration. Glowing cyan, electric violet, and phosphorescent mint on a solid black background.",
+        "Edo Woodblock":          "In the style of Edo-period Japanese woodblock print. Vermillion, indigo, and aged cream on a solid black background.",
+        "Medieval Manuscript":    "In the style of a medieval illuminated manuscript. Ultramarine blue, burnished gold leaf, and crimson on a solid black background.",
+        "Bauhaus Geometric":      "In the style of Bauhaus geometric abstraction. Pure red, white, and yellow primary forms on a solid black background.",
+        "Electron Microscope":    "In the style of electron microscope scanning photography. Monochromatic silver, platinum, and graphite on solid black.",
+        "Cyanotype":              "In the style of cyanotype photogram. Prussian blue and white silhouettes on solid black.",
+        "Charred Woodblock":      "In the style of charred woodblock relief print. Burnt sienna, ash white, and ember orange on solid black.",
+        "Aztec Circuit":          "In the style of Aztec codex fused with circuit board diagrams. Jade green, obsidian, and blood red on solid black.",
+        "Soviet Constructivist":  "In the style of Soviet Constructivist propaganda poster fused with biological anatomy. Stark red, steel grey, and bone white on solid black.",
+        "Alchemical Manuscript":  "In the style of alchemical manuscript illustration. Oxidized copper green, tarnished silver, and sulfur yellow on solid black.",
+        "Light Painting":         "In the style of long-exposure light painting photography. Neon magenta, electric blue, and molten gold trails on solid black.",
+        "Laser-Etched Glass":     "In the style of laser-etched glass engraving. Pure white and ice blue refraction lines on solid black.",
+        "Pre-Columbian Textile":  "In the style of pre-Columbian textile weaving translated to illustration. Terracotta, turquoise, and maize yellow geometric motifs on solid black.",
+        "Dutch Mezzotint":        "In the style of 17th century Dutch Golden Age mezzotint. Rich velvety blacks, silver-white highlights, and deep sepia mid-tones on solid black.",
+        "Islamic Geometric":      "In the style of Islamic geometric tilework translated to fine ink illustration. Deep lapis lazuli, burnished copper, and ivory white on solid black background.",
+        "Alhambra Geometry":      "In the style of modern architectural interpretation of Alhambra palace geometry. Rose gold, matte silver, and warm white on solid black.",
+        "Bauhaus Textile":        "In the style of Bauhaus textile weave translated to fine illustration. Strict alternating black and white rectangular block. Metallic gold threads run diagonally like wires of light stitched through woven darkness. Black background.",
+        "Kusama Infinity Dots":   "In the style of Japanese Yayoi Kusama infinity dot obsession. Dense overlapping white polka dot fields with fine 24-karat gold thread outlines tracing the edges of each circle on solid black background.",
+        "Inflated Textiles":      "In the style of haute couture inflated textiles. Ivory silk organza fabric printed with perfect black polka dots, dramatically puffed into sculptural balloon-like volumes against solid black.",
+        "Cinematic B&W":          "Cinematic style, photography, ultra detailed, black and white with some NY cabs orange.",
+    }
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
         ("zoom-in",  0.8, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),

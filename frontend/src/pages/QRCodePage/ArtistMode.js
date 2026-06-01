@@ -1394,6 +1394,25 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
           <div className="settings-inner">
             <div className="settings-section">
               <div className="settings-row">
+                <span className="settings-label">Style</span>
+              </div>
+              <select
+                className="settings-select"
+                value={settingsStyleIndex}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value, 10);
+                  setSettingsStyleIndex(idx);
+                  sendSetting("style_index", idx);
+                }}
+              >
+                {styleNames.map((name, i) => (
+                  <option key={i} value={i}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
                 <span className="settings-label">AI Mode</span>
                 <span className="settings-value">{settingsMode}</span>
               </div>
@@ -1515,25 +1534,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
               >
                 <span className="settings-toggle__thumb" />
               </button>
-            </div>
-
-            <div className="settings-section">
-              <div className="settings-row">
-                <span className="settings-label">Style</span>
-              </div>
-              <select
-                className="settings-select"
-                value={settingsStyleIndex}
-                onChange={(e) => {
-                  const idx = parseInt(e.target.value, 10);
-                  setSettingsStyleIndex(idx);
-                  sendSetting("style_index", idx);
-                }}
-              >
-                {styleNames.map((name, i) => (
-                  <option key={i} value={i}>{name}</option>
-                ))}
-              </select>
             </div>
           </div>
         </section>

@@ -222,7 +222,7 @@ async def main():
                     last_generated_image_bgr = new_bgr
                     await bus.publish_ai_message_to_phone(
                         session_id=session_id, nickname="NonCarbon Artist",
-                        text="Generating...",
+                        text=f"[{cycle + 1}] {prompt}",
                         image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
                         image_purpose="output",
                     )
@@ -264,7 +264,7 @@ async def main():
                 session_id = current_session_id or config.ADMIN_SESSION_ID
                 await bus.publish_ai_message_to_phone(
                     session_id=session_id, nickname="NonCarbon Artist",
-                    text="auto_generating",
+                    text="Auto-generation loop started — watch the art flow",
                 )
                 start_auto_gen()
 

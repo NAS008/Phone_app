@@ -306,8 +306,11 @@ async def main():
             return
 
         if nickname not in joined_users:
-            print(f"✗ Server: ignored message from unjoined user '{nickname}'")
-            return
+            if str(session_id) == config.ADMIN_SESSION_ID:
+                joined_users.add(nickname)  # auto-rejoin admin if session was reset
+            else:
+                print(f"✗ Server: ignored message from unjoined user '{nickname}'")
+                return
 
         effective_session_id = session_id if str(session_id) == config.ADMIN_SESSION_ID else (current_session_id or session_id)
 

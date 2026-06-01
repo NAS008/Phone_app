@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import time
 import uuid
@@ -178,8 +179,9 @@ class Bus:
         if self.pubsub is None:
             raise RuntimeError("Bus is not connected")
 
-        msg = self.pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout)
+        msg = self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0)  # non-blocking check
         if not msg:
+            await asyncio.sleep(timeout)  # yield to event loop so other tasks (idle_watcher, etc.) can run
             return False
 
         channel = msg["channel"]

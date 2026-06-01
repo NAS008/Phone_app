@@ -132,6 +132,31 @@ const RECEIVED_ACKNOWLEDGMENTS = [
 const pickAcknowledgment = () =>
   RECEIVED_ACKNOWLEDGMENTS[Math.floor(Math.random() * RECEIVED_ACKNOWLEDGMENTS.length)];
 
+const STYLE_NAMES = [
+  "Botanical Lithograph",
+  "Art Nouveau Engraving",
+  "Deep-Sea Specimen",
+  "Edo Woodblock",
+  "Medieval Manuscript",
+  "Bauhaus Geometric",
+  "Electron Microscope",
+  "Cyanotype",
+  "Charred Woodblock",
+  "Aztec Circuit",
+  "Soviet Constructivist",
+  "Alchemical Manuscript",
+  "Light Painting",
+  "Laser-Etched Glass",
+  "Pre-Columbian Textile",
+  "Dutch Mezzotint",
+  "Islamic Geometric",
+  "Alhambra Geometry",
+  "Bauhaus Textile",
+  "Kusama Infinity Dots",
+  "Inflated Textiles",
+  "Cinematic B&W",
+];
+
 const INTRO_TYPING_INTERVAL = 42;
 const INTRO_TYPING_TARGET = 70;
 const INTRO_MESSAGE_GAP = 620;
@@ -366,6 +391,8 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
+  const [settingsSelfGenOn, setSettingsSelfGenOn] = useState(false);
+  const [settingsStyleIndex, setSettingsStyleIndex] = useState(16);
 
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -1491,6 +1518,42 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
                 <span className="settings-toggle__thumb" />
               </button>
             </div>
+
+            <div className="settings-section settings-row">
+              <span className="settings-label">Self Generation</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settingsSelfGenOn}
+                className={`settings-toggle${settingsSelfGenOn ? " on" : ""}`}
+                onClick={() => {
+                  const next = !settingsSelfGenOn;
+                  setSettingsSelfGenOn(next);
+                  sendSetting("self_gen_on", next);
+                }}
+              >
+                <span className="settings-toggle__thumb" />
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">Style</span>
+              </div>
+              <select
+                className="settings-select"
+                value={settingsStyleIndex}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value, 10);
+                  setSettingsStyleIndex(idx);
+                  sendSetting("style_index", idx);
+                }}
+              >
+                {STYLE_NAMES.map((name, i) => (
+                  <option key={i} value={i}>{name}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </section>
       )}
@@ -1606,16 +1669,18 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
             <HeartIcon />
           </button>
 
-          <button
-            type="button"
-            className={`icon-button action-button${isVideoRequesting ? " toggled" : ""}`}
-            onClick={handleVideoRequest}
-            disabled={isVideoRequesting}
-            aria-label="Request video clip"
-            title="Get animated clip"
-          >
-            <VideoIcon />
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              className={`icon-button action-button${isVideoRequesting ? " toggled" : ""}`}
+              onClick={handleVideoRequest}
+              disabled={isVideoRequesting}
+              aria-label="Request video clip"
+              title="Get animated clip"
+            >
+              <VideoIcon />
+            </button>
+          )}
 
           {isAdmin && (
             <button

@@ -39,10 +39,12 @@ class Gemini:
         GEMINI_API_KEY: str,
         TEXT_MODEL: str = "gemini-2.5-flash",
         IMAGE_MODEL: str = "gemini-2.5-flash-image",
+        STYLE = "None",
     ):
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.TEXT_MODEL = TEXT_MODEL
         self.IMAGE_MODEL = IMAGE_MODEL
+        self.STYLE = STYLE
         print("✓ Gemini: unified text/image model ready")
 
     def _extract_text(self, response) -> str:
@@ -219,7 +221,7 @@ class Gemini:
         for attempt in range(2):
             try:
                 image_bytes = self.generate_image(
-                    prompt=decision["prompt"],
+                    prompt=decision["prompt"] + " " + self.STYLE,
                     parts=parts,
                     history=history,
                 )
@@ -246,6 +248,43 @@ class Gemini:
             ],
             "prompt": decision["prompt"],
         }
+
+    def generate_story_prompts(self, parts: List[Dict[str, Any]]) -> List[str]:
+        """Generate a short story from user parts and derive 10 SD image prompts."""
+        import json
+        sdk_parts = self._bus_parts_to_sdk_parts(parts)
+        if not sdk_parts:
+            sdk_parts = [types.Part(text="something beautiful and mysterious")]
+
+        instruction = (
+            "You are a visual storyteller. The user has shared something with you.\n"
+            "Write a short evocative story (3–5 sentences) inspired by it, "
+            "then derive exactly 10 distinct image prompts for Stable Diffusion.\n"
+            "Prompt rules: each under 20 words, one strong visual subject, "
+            "no style words, no camera/lens terms.\n"
+            "Return strict JSON only:\n"
+            "{\"story\": \"...\", \"prompts\": [\"prompt1\", ..., \"prompt10\"]}"
+        )
+
+        response = self.client.models.generate_content(
+            model=self.TEXT_MODEL,
+            contents=[types.Content(role="user", parts=sdk_parts)],
+            config=types.GenerateContentConfig(
+                system_instruction=instruction,
+                response_mime_type="application/json",
+            ),
+        )
+
+        text = self._extract_text(response)
+        if not text:
+            raise ValueError("empty story/prompts response")
+
+        data = json.loads(text)
+        prompts = [p.strip() for p in (data.get("prompts") or []) if isinstance(p, str) and p.strip()][:10]
+        story = (data.get("story") or "")[:120]
+        print(f"✓ Gemini: self-gen story — {story}")
+        print(f"✓ Gemini: {len(prompts)} self-gen prompts")
+        return prompts
 
     # def describe_image(self, image_path: str, instruction: str) -> str:
     #     """Image + text prompt → text response (no image output)."""

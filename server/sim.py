@@ -128,18 +128,6 @@ def k_advect_particles_rk2(
     xyz[pid] = clamp_position(p + v2*dt, h, G)
 
 @wp.kernel
-def k_goal_force(
-    xyz: wp.array(dtype=wp.vec3),
-    xyz_goal: wp.array(dtype=wp.vec3), goal_id: wp.array(dtype=int),
-    strength: float, dt: float
-):
-    tid = wp.tid()
-    gid = goal_id[tid]
-
-    v = (xyz_goal[gid] - xyz[tid]) * strength * dt
-    xyz[tid] += v * dt
-
-@wp.kernel
 def k_inject_mouse(
     u_prev: wp.array(dtype=float), v_prev: wp.array(dtype=float), w_prev: wp.array(dtype=float),
     m: wp.vec3, mv: wp.vec3, mradius: float, strength: float,
@@ -151,7 +139,8 @@ def k_inject_mouse(
     k = tid // (G.x*G.y)
     wx = (float(i) - 0.5) / float(G.x)
     wy = (float(j) - 0.5) / float(G.y)
-    dx = wx - m.x;  dy = wy - m.y
+    dx = wx - m.x
+    dy = wy - m.y
     dist2 = dx*dx + dy*dy
     if dist2 < mradius * mradius:
         q  = wp.sqrt(dist2) / mradius
@@ -275,31 +264,82 @@ def lum(image: wp.array(dtype=wp.uint8), idx: int) -> float:
     g = float(image[idx + 1])
     b = float(image[idx])
     return 1.0 - (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-   
+
 @wp.kernel
-def k_new_image(
-    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
-    xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float),
-    h: float, G: wp.vec3i, depth_factor: float
+def k_goal_force(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_goal: wp.array(dtype=wp.vec3),
+    strength: float
 ):
     tid = wp.tid()
-    p = xyz_goal[tid]
 
+    xyz[tid] += (xyz_goal[tid] - xyz[tid]) * strength
+
+@wp.kernel
+def k_base_id(
+    rgb: wp.array(dtype=wp.vec3), color_id: wp.array(dtype=int)
+):
+    tid = wp.tid()
+
+    r = int(rgb[tid].x)
+    g = int(rgb[tid].y)
+    b = int(rgb[tid].z)
+
+    lum = int(0.2126 * float(r) + 0.7152 * float(g) + 0.0722 * float(b))
+    color_id[tid] = lum
+
+@wp.kernel
+def k_color_id(
+    pixels: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    xyz_base: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3),
+    color_id: wp.array(dtype=int),
+    h: float, G: wp.vec3i
+):
+    tid = wp.tid()
+
+    p = xyz_base[tid]
     x0 = (1.0 - h * float(G.x)) / 2.0
     y0 = (1.0 - h * float(G.y)) / 2.0
 
     ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
     iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
+
+    idx = 3 * (ix + iy * IMAGE_SIZE)
+    r = int(pixels[idx + 2])
+    g = int(pixels[idx + 1])
+    b = int(pixels[idx])
+
+    rgb[tid] = wp.vec3(float(r), float(g), float(b))
+
+    lum = int(0.2126 * float(r) + 0.7152 * float(g) + 0.0722 * float(b))
+    color_id[tid] = lum
+
+@wp.kernel
+def k_new_image_sorted(
+    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float), base_id: wp.array(dtype=int), goal_id: wp.array(dtype=int),
+    h: float, G: wp.vec3i, depth_factor: float
+):
+    tid = wp.tid()
+
+    bid = base_id[tid]
+    gid = goal_id[tid]
+    p = xyz_base[gid]
+    x0 = (1.0 - h * float(G.x)) / 2.0
+    y0 = (1.0 - h * float(G.y)) / 2.0
+    ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
+    iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
     idc  = 3 * (ix  + iy  * IMAGE_SIZE)
-    rgb[tid] = wp.vec3(
+    
+    rgb[bid] = wp.vec3(
         float(pixels[idc + 2]),
         float(pixels[idc + 1]),
         float(pixels[idc])
     )
     lumc = lum(blurred, idc)
     z_max = depth_factor * h * float(G.z - 2)
-    xyz_goal[tid] = wp.vec3(p.x, p.y, h + z_max * lumc)
-    invmass[tid] = 0.1 + 0.9 * lumc
+    xyz_goal[bid] = wp.vec3(p.x, p.y, p.z + z_max * lumc)
+    invmass[bid] = 0.1 + 0.9 * lumc
 
     # if ix + 1 > IMAGE_SIZE - 1:
     #     lumr = 1.0
@@ -321,6 +361,77 @@ def k_new_image(
     # nz = 1.0
     # length = wp.sqrt(nx*nx + ny*ny + nz*nz) + 1e-6
     # rot[tid] = wp.vec3(nx / length, ny / length, nz / length)
+
+@wp.kernel
+def k_new_image(
+    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float),
+    h: float, G: wp.vec3i, depth_factor: float
+):
+    tid = wp.tid()
+
+    p = xyz_base[tid]
+    x0 = (1.0 - h * float(G.x)) / 2.0
+    y0 = (1.0 - h * float(G.y)) / 2.0
+    ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
+    iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
+    idc  = 3 * (ix  + iy  * IMAGE_SIZE)
+    
+    rgb[tid] = wp.vec3(
+        float(pixels[idc + 2]),
+        float(pixels[idc + 1]),
+        float(pixels[idc])
+    )
+    lumc = lum(blurred, idc)
+    z_max = depth_factor * h * float(G.z - 2)
+    xyz_goal[tid] = wp.vec3(p.x, p.y, p.z + z_max * lumc)
+    invmass[tid] = 0.1 + 0.9 * lumc
+
+@wp.kernel
+def k_world_boundaries(
+    xyz: wp.array(dtype=wp.vec3), xyz_prior: wp.array(dtype=wp.vec3),
+    r: float, h: float, G: wp.vec3i
+):
+    tid = wp.tid()
+    p = xyz[tid]
+    p_prior = xyz_prior[tid]
+
+    # Collision with world boundaries
+    margin = h + r
+    restitution = 0.9
+    if p.x < margin:
+        vx = p.x - p_prior.x
+        x = margin
+        vx = restitution * wp.abs(vx)
+        x_prior = x - vx
+    if p.x > h * float(G.x) - margin:
+        vx = p.x - p_prior.x
+        x = h * float(G.x) - margin
+        vx = -restitution * wp.abs(vx)
+        x_prior = x - vx
+    if p.y < margin:
+        vy = p.y - p_prior.y
+        y = margin
+        vy = restitution * wp.abs(vy)
+        y_prior = y - vy
+    if p.y > h * float(G.y) - margin:
+        vy = p.y - p_prior.y
+        y = h * float(G.y) - margin
+        vy = -restitution * wp.abs(vy)
+        y_prior = y - vy
+    if p.z < margin:
+        vz = p.z - p_prior.z
+        z = margin
+        vz = restitution * wp.abs(vz)
+        z_prior = z - vz
+    if p.z > h * float(G.z) - margin:
+        vz = p.z - p_prior.z
+        z = h * float(G.z) - margin
+        vz = -restitution * wp.abs(vz)
+        z_prior = z - vz
+
+    xyz[tid] = wp.vec3(x, y, z)
+    xyz_prior[tid] = wp.vec3(x_prior, y_prior, z_prior)
 
 class Simulator:
     def __init__(self,
@@ -344,7 +455,6 @@ class Simulator:
 
         pos = []
         n_x, n_y = [], []
-        goal_id = []
         x0 = self.h + self.r
         y0 = self.h + self.r
         z0 = self.h + self.r
@@ -363,14 +473,16 @@ class Simulator:
                     else: n_x.append(-1)
                     if j < PY_inner - 1: n_y.append(particles + PX_inner)
                     else: n_y.append(-1)
-                    goal_id.append(particles)
                     particles += 1
         self.particles = len(pos)
         # Particle arrays
         self.xyz = wp.array(pos, dtype=wp.vec3, device="cuda")
         self.xyz_prior = wp.array(pos, dtype=wp.vec3, device="cuda")
         self.xyz_goal = wp.array(pos, dtype=wp.vec3, device="cuda")
-        self.goal_id = wp.array(goal_id, dtype=int, device="cuda")
+        self.xyz_base = wp.array(pos, dtype=wp.vec3, device="cuda")
+        # self.base_id = wp.zeros(self.particles, dtype=int, device="cuda")
+        # self.goal_id = wp.zeros(self.particles, dtype=int, device="cuda")
+        # self.color_id = wp.zeros(self.particles, dtype=int, device="cuda")
         self.xyz_corr = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.rgb = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.rot = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
@@ -437,16 +549,44 @@ class Simulator:
                     self.div, self.p]:
             arr.zero_()
 
-        self.pixels = wp.array(np.ascontiguousarray(img).flatten(), dtype=wp.uint8, device="cuda")  
-        blurred = cv2.GaussianBlur(img, (self.smooth, self.smooth), 0)   
-        self.blurred = wp.array(np.ascontiguousarray(blurred).flatten(), dtype=wp.uint8, device="cuda")   
-        self.grad_x, self.grad_y, self.lum = self._compute_gradients(blurred)  
+        self.pixels = wp.array(np.ascontiguousarray(img).flatten(), dtype=wp.uint8, device="cuda")
+        blurred = cv2.GaussianBlur(img, (self.smooth, self.smooth), 0)
+        self.blurred = wp.array(np.ascontiguousarray(blurred).flatten(), dtype=wp.uint8, device="cuda")
+        self.grad_x, self.grad_y, self.lum = self._compute_gradients(blurred)
+
+        # wp.launch(k_base_id, dim=self.particles, inputs=[
+        #     self.rgb, self.color_id
+        # ], device="cuda")
+        # wp.synchronize()
+   
+        # color_id_np = self.color_id.numpy()
+        # sorted = np.argsort(color_id_np, kind="stable").astype(np.int32)
+        # self.base_id = wp.array(sorted, dtype=int, device="cuda")
+
+        # wp.launch(k_color_id, dim=self.particles, inputs=[
+        #     self.pixels, self.IMAGE_SIZE,
+        #     self.xyz_base, self.rgb, self.color_id,
+        #     self.h, self.G
+        # ], device="cuda")
+        # wp.synchronize()
+            
+        # color_id_np = self.color_id.numpy()
+        # rng = np.random.default_rng()
+        # tie = rng.random(len(color_id_np))
+        # sorted = np.lexsort((tie, color_id_np))
+        # self.goal_id = wp.array(sorted, dtype=int, device="cuda")
+
+        # wp.launch(k_new_image_sorted, dim=self.particles, inputs=[
+        #     self.pixels, self.blurred, self.IMAGE_SIZE,
+        #     self.xyz_base, self.xyz_goal, self.rgb, self.invmass, self.base_id, self.goal_id,
+        #     self.h, self.G, depth_factor
+        # ], device="cuda")
+
         wp.launch(k_new_image, dim=self.particles, inputs=[
             self.pixels, self.blurred, self.IMAGE_SIZE,
-            self.xyz_goal, self.rgb, self.invmass,
+            self.xyz_base, self.xyz_goal, self.rgb, self.invmass,
             self.h, self.G, depth_factor
         ], device="cuda")
-        self.sort_invmass()
 
     def project(self):
         wp.launch(k_divergence, dim=self.G3, inputs=[
@@ -461,7 +601,7 @@ class Simulator:
         wp.launch(k_inject_mouse, dim=self.G3, inputs=[
             self.u_prev, self.v_prev, self.w_prev,
             wp.vec3(*m), wp.vec3(*mv),
-            0.05, 1.0, self.G
+            0.1, 1.0, self.G
         ], device="cuda")
 
     def _apply_constraints(self):
@@ -478,15 +618,12 @@ class Simulator:
             self.jacobi
         ], device="cuda")
 
-    def sort_invmass(self):
-        invmass_np = self.invmass.numpy()
-        sorted_indices = np.argsort(invmass_np, kind="stable").astype(np.int32)
-        # Inverse permutation: particle at rank i goes to goal i.
-        # sorted_indices[i] = "which particle is i-th lightest"
-        # goal_id[sorted_indices[i]] = i  →  lightest particle → goal 0, etc.
-        goal_id_np = np.empty(self.particles, dtype=np.int32)
-        goal_id_np[sorted_indices] = np.arange(self.particles, dtype=np.int32)
-        self.goal_id = wp.array(goal_id_np, dtype=wp.int32, device="cuda")
+    def _apply_boundaries(self):
+        h = self.config.h
+        wp.launch(k_world_boundaries, dim=self.particles, inputs=[
+            self.xyz, self.xyz_prior,
+            self.r, self.h, self.G
+        ], device="cuda")
 
     def update(self, constraints_on=True, go_back_on=True, ):
         # Grid
@@ -514,8 +651,10 @@ class Simulator:
 
         if go_back_on:
             wp.launch(k_goal_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_goal, self.goal_id, 0.1, self.dt
+                self.xyz, self.xyz_goal, 0.05
             ], device="cuda")
+
+        self._apply_constraints()
 
         wp.launch(k_update_rotation, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior,

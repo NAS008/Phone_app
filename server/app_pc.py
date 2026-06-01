@@ -29,6 +29,8 @@ import io
 import urllib.request
 import urllib.parse
 import numpy as np
+import math
+import time
 import asyncio
 import ctypes
 import time
@@ -127,7 +129,53 @@ def overlay(frame, overlay_img, proportion=16, alignment="center"):
     blended = overlay_bgr * alpha + region * (1.0 - alpha)
     out[y0:y0+h, x0:x0+w] = blended.astype(out.dtype)
     return out
-    
+
+class LowPass:
+    def __init__(self, x0=0.0):
+        self.y = x0
+        self.ready = False
+
+    def apply(self, x, alpha):
+        if not self.ready:
+            self.y = x
+            self.ready = True
+        else:
+            self.y = alpha * x + (1.0 - alpha) * self.y
+        return self.y
+
+def smoothing_alpha(dt, cutoff):
+    r = 2.0 * math.pi * cutoff * dt
+    return r / (r + 1.0)
+
+class OneEuro:
+    def __init__(self, min_cutoff=1.2, beta=0.02, d_cutoff=1.0):
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.xf = LowPass()
+        self.dxf = LowPass()
+        self.t_prev = None
+        self.x_prev = None
+
+    def apply(self, x, t):
+        if self.t_prev is None:
+            self.t_prev = t
+            self.x_prev = x
+            return self.xf.apply(x, 1.0)
+
+        dt = max(1e-6, t - self.t_prev)
+        dx = (x - self.x_prev) / dt
+        ad = smoothing_alpha(dt, self.d_cutoff)
+        dx_hat = self.dxf.apply(dx, ad)
+
+        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
+        a = smoothing_alpha(dt, cutoff)
+        x_hat = self.xf.apply(x, a)
+
+        self.t_prev = t
+        self.x_prev = x
+        return x_hat
+        
 async def main():
     config = Config()
 
@@ -146,7 +194,7 @@ async def main():
     sim = Simulator(
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
-        G=config.G, L=4,
+        G=config.G, L=1,
         smooth=15,
     )
     sim_constraints_on = True
@@ -158,7 +206,7 @@ async def main():
         img_a = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     else:
         img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-    sim.reset(img_a)
+    sim.new_image(img_a)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
 
     # Ray tracer setup
@@ -293,7 +341,7 @@ async def main():
             for f in snapshot
         ]
         buf = io.BytesIO()
-        duration_ms = max(1, int(1000 / (config.FPS * 8)))
+        duration_ms = max(1, int(1000 / (config.FPS * 2)))
         pil_frames[0].save(
             buf,
             format="GIF",
@@ -346,6 +394,9 @@ async def main():
     next_tick = time.perf_counter()
     next_release = next_tick
 
+    fx = OneEuro(min_cutoff=1.5, beta=0.03, d_cutoff=1.0)
+    fy = OneEuro(min_cutoff=1.5, beta=0.03, d_cutoff=1.0)
+    fz = OneEuro(min_cutoff=1.0, beta=0.02, d_cutoff=1.0)
     while True:
         await bus.poll()
 
@@ -357,7 +408,7 @@ async def main():
 
         if now >= next_release:
             if frames:
-                sim.reset(frames.popleft())
+                sim.new_image(frames.popleft())
             next_release += release_frame_dur
             if now > next_release + release_frame_dur:
                 next_release = now + release_frame_dur
@@ -366,20 +417,37 @@ async def main():
             ok, canvas, frame, result = cam.read()
             if not ok:
                 continue
+
             hand = cam.get_hand_raw(result)
             if hand is not None:
-                pointer_goal[0] = hand["x"]
-                pointer_goal[1] = 1.0 - hand["y"]
-                
+                raw_x = float(np.clip(hand["x"], 0.0, 1.0))
+                raw_y = float(np.clip(1.0 - hand["y"], 0.0, 1.0))
+
+                pointer_goal[0] = fx.apply(raw_x, now)
+                pointer_goal[1] = fy.apply(raw_y, now)
+
         pointer_prior_x = pointer[0]
         pointer_prior_y = pointer[1]
-        alpha = 0.3
-        pointer[0] += (pointer_goal[0] - pointer[0]) * alpha
-        pointer[1] += (pointer_goal[1] - pointer[1]) * alpha
-        vx = (pointer[0] - pointer_prior_x) / alpha
-        vy = (pointer[1] - pointer_prior_y) / alpha
-        vz = np.hypot(vx, vy)
-        sim.inject_mouse(pointer, [vx, vy, vz])
+        follow = 0.18
+        pointer[0] += follow * (pointer_goal[0] - pointer[0])
+        pointer[1] += follow * (pointer_goal[1] - pointer[1])
+        dt = render_frame_dur
+        vx = (pointer[0] - pointer_prior_x) / max(dt, 1e-6)
+        vy = (pointer[1] - pointer_prior_y) / max(dt, 1e-6)
+        # clamp spikes
+        vmax = 1.5
+        vx = float(np.clip(vx, -vmax, vmax))
+        vy = float(np.clip(vy, -vmax, vmax))
+        # optional extra smoothing
+        vel_smooth = 0.25
+        if not hasattr(main, "_vx"):
+            main._vx = 0.0
+            main._vy = 0.0
+        main._vx += vel_smooth * (vx - main._vx)
+        main._vy += vel_smooth * (vy - main._vy)
+        vz = 0.15 * np.hypot(main._vx, main._vy)
+        sim.inject_mouse(pointer, [main._vx, main._vy, vz])
+
         if sim_gradient_on:
             sim.inject_gradient()
 
@@ -389,7 +457,7 @@ async def main():
         elif ray_shape == 1:
             frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.9 * sim.r, 0.9 * sim.r, 6.0 * sim.r)
         elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.3 * sim.r)
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.6 * sim.r)
         elif ray_shape == 3:
             frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
         else:

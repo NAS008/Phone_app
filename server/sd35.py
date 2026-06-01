@@ -124,7 +124,7 @@ class StableDiffusion:
         noise = torch.randn_like(latents_a, generator=generator)
 
         sigma_min = 0.60
-        sigma_max = 0.90
+        sigma_max = 0.98
 
         for i in range(1, self.INFERENCE_STEPS + 1):
             t = i / (self.INFERENCE_STEPS + 1)

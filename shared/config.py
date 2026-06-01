@@ -10,11 +10,10 @@ class Config:
     PHONE_NAME = "PHONE"
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
-    WINDOW_W, WINDOW_H = 2044, 2048
-    PHONE_W, PHONE_H = 512,512#512, 1024
+    WINDOW_W, WINDOW_H = 3840, 2560
     IMAGE_SIZE = 512
     GRID_SIZE = 128
-    PIXELS_PER_CELL = 2#IMAGE_SIZE // GRID_SIZE
+    PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
     if aspect >= 1.0:
         GX = GRID_SIZE
@@ -22,17 +21,17 @@ class Config:
     else:
         GX = int(GRID_SIZE * aspect)
         GY = GRID_SIZE
-    GZ = GRID_SIZE // 8
+    GZ = GRID_SIZE // 4
     G = [GX, GY, GZ]
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
     light = [0.5 * GX / max(GX, GY), 1.0 * GY / max(GX, GY), 0.5]    
     fov = 1.2
-    samples = 1
+    samples = 4
     background = [0.0, 0.0, 0.0]
-    ambient = 0.4
-    shadow = 0.4
-    FPS = 16
+    ambient = 0.6
+    shadow = 0.2
+    FPS = 12
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
@@ -73,7 +72,7 @@ class Config:
     AD_SEED            = 80367253
 
     # Optical flow
-    OF_FRAMES = 32
+    OF_FRAMES = 24
 
     STYLE = [
         "In style of high-detail vintage botanical lithograph. Pale salmon, dusty rose, and muted sage green, solid black background.",

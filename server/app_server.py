@@ -73,6 +73,7 @@ async def main():
         GEMINI_API_KEY=config.GEMINI_API_KEY,
         TEXT_MODEL=config.GEMINI_TEXT_MODEL,
         IMAGE_MODEL=config.GEMINI_IMAGE_MODEL,
+        STYLE = config.STYLE[16],
     )
 
     current_session_id = ""
@@ -80,6 +81,10 @@ async def main():
     session_histories = {}
     pending_parts = {}
     ai_mode = 0
+    self_gen_on = False
+    last_user_parts = []
+    _self_gen_task = None
+    _self_gen_cancel = [False]
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
@@ -118,6 +123,99 @@ async def main():
             )
         return _ad
 
+    async def run_self_gen_loop(cancel):
+        nonlocal last_generated_image_bgr
+        session_id = current_session_id or config.ADMIN_SESSION_ID
+        try:
+            parts_snapshot = list(last_user_parts)
+            prompts = await loop.run_in_executor(
+                executor, lambda: gemini.generate_story_prompts(parts_snapshot)
+            )
+            if not prompts:
+                print("✗ Server: self-gen produced no prompts")
+                return
+            idx = 0
+            while not cancel[0]:
+                prompt = prompts[idx % len(prompts)]
+                print(f"✓ Server: self-gen [{idx + 1}/{len(prompts)}] — {prompt}")
+
+                try:
+                    image_bytes = await loop.run_in_executor(
+                        executor,
+                        lambda p=prompt: gemini.generate_image(p + " " + gemini.STYLE),
+                    )
+                except GeminiBlockedError as e:
+                    print(f"✗ Server: self-gen blocked ({e.reason}): {e.user_message}")
+                    idx = (idx + 1) % len(prompts)
+                    continue
+                except Exception as e:
+                    print(f"✗ Server: self-gen image failed: {e}")
+                    idx = (idx + 1) % len(prompts)
+                    continue
+
+                if not image_bytes or cancel[0]:
+                    idx = (idx + 1) % len(prompts)
+                    continue
+
+                new_bgr = jpeg_to_bgr(image_bytes)
+                if new_bgr is None:
+                    idx = (idx + 1) % len(prompts)
+                    continue
+                new_bgr = cv2.resize(new_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+
+                prev_bgr = last_generated_image_bgr
+                q = asyncio.Queue()
+
+                def sd_worker(pb=prev_bgr, nb=new_bgr, p=prompt, c=cancel):
+                    try:
+                        for frame in get_sd().generate_between_images(pb, nb, p):
+                            if c[0]:
+                                break
+                            loop.call_soon_threadsafe(q.put_nowait, frame)
+                    except Exception as exc:
+                        print(f"✗ Server: self-gen SD failed: {exc}")
+                    finally:
+                        loop.call_soon_threadsafe(q.put_nowait, None)
+
+                executor.submit(sd_worker)
+
+                while not cancel[0]:
+                    frame = await q.get()
+                    if frame is None:
+                        break
+                    await bus.publish_ai_message_to_pc(
+                        session_id=session_id, nickname="NonCarbon Artist",
+                        image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
+                        image_purpose="output",
+                    )
+
+                if not cancel[0]:
+                    last_generated_image_bgr = new_bgr
+                    await bus.publish_ai_message_to_phone(
+                        session_id=session_id, nickname="NonCarbon Artist",
+                        text="Generating...",
+                        image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                        image_purpose="output",
+                    )
+
+                idx = (idx + 1) % len(prompts)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"✗ Server: self-gen loop crashed: {e}")
+
+    def start_self_gen():
+        nonlocal _self_gen_task, _self_gen_cancel
+        _self_gen_cancel[0] = True
+        if _self_gen_task and not _self_gen_task.done():
+            _self_gen_task.cancel()
+        _self_gen_cancel = [False]
+        if last_user_parts:
+            _self_gen_task = asyncio.create_task(run_self_gen_loop(_self_gen_cancel))
+        else:
+            print("✗ Server: self-gen enabled but no user message yet")
+
     async def _publish_error(session_id, text, turn_id):
         await bus.publish_ai_message_to_pc(
             session_id=session_id, nickname="NonCarbon Artist",
@@ -147,7 +245,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr
+        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_user_parts
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -168,6 +266,12 @@ async def main():
         saved = pending_parts.pop(session_key, [])
         effective_parts = saved + parts if saved else parts
         turn_id = payload.get("turn_id")
+
+        last_user_parts = list(effective_parts)
+
+        if self_gen_on:
+            start_self_gen()
+            return
 
         # ── Mode 2: AnimateDiff ──────────────────────────────────────────────
         if ai_mode == 2:
@@ -332,12 +436,26 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode
+        nonlocal current_session_id, ai_mode, self_gen_on
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
         if "mode" in params:
             ai_mode = int(params["mode"])
             print(f"✓ Server: ai_mode set to {ai_mode}")
+        if "style_index" in params:
+            idx = int(params["style_index"])
+            if 0 <= idx < len(config.STYLE):
+                gemini.STYLE = config.STYLE[idx]
+                print(f"✓ Server: style set to index {idx}")
+        if "self_gen_on" in params:
+            self_gen_on = bool(params["self_gen_on"])
+            print(f"✓ Server: self_gen_on={self_gen_on}")
+            if self_gen_on:
+                start_self_gen()
+            else:
+                _self_gen_cancel[0] = True
+                if _self_gen_task and not _self_gen_task.done():
+                    _self_gen_task.cancel()
 
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)

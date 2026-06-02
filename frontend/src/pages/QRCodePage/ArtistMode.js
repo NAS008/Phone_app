@@ -361,11 +361,13 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [isVideoRequesting, setIsVideoRequesting] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [settingsMode, setSettingsMode] = useState(0);
+  const [settingsStyle, setSettingsStyle] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
   const [settingsZoom, setSettingsZoom] = useState(1.1);
   const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
+  const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
 
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -951,6 +953,10 @@ const appendFeed = useCallback((message) => {
     );
 
     setIsSettingsPanelOpen(false);
+    if (settingsAutoPlay) {
+      setSettingsAutoPlay(false);
+      sendSetting("auto_play", false);
+    }
     setIsSubmitting(true);
     try {
       await MessageBusService.sendSensorFrameWithTranscriptToMessageBus(
@@ -986,7 +992,9 @@ const appendFeed = useCallback((message) => {
     isSubmitting,
     nickname,
     prompt,
+    sendSetting,
     sessionId,
+    settingsAutoPlay,
   ]);
 
   useEffect(() => {
@@ -1386,6 +1394,41 @@ const appendFeed = useCallback((message) => {
           <div className="settings-inner">
             <div className="settings-section">
               <div className="settings-row">
+                <span className="settings-label">Style</span>
+              </div>
+              <select
+                className="settings-select"
+                value={settingsStyle}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setSettingsStyle(v);
+                  sendSetting("style_index", v);
+                }}
+              >
+                {[
+                  "Botanical Lithograph","Art Nouveau Engraving","Deep-Sea Specimen",
+                  "Edo Woodblock","Medieval Manuscript","Bauhaus Geometric",
+                  "Electron Microscope","Cyanotype","Charred Woodblock","Aztec Circuit",
+                  "Soviet Constructivist","Alchemical Manuscript","Light Painting",
+                  "Laser-Etched Glass","Pre-Columbian Textile","Dutch Mezzotint",
+                  "Islamic Geometric","Alhambra Geometry","Bauhaus Textile",
+                  "Kusama Infinity Dots","Inflated Textiles","Cinematic B&W",
+                  "Van Gogh","Theo Jansen","Mario Giacomelli","Karl Blossfeldt",
+                  "Hiroshi Sugimoto","Ellsworth Kelly","Edward Hopper","James Turrell",
+                  "Giorgio Morandi","Lewis Baltz","Georgia O'Keeffe","Patrick Caulfield",
+                  "Michael Kenna","Fashion","Barcode","Renaissance Painting",
+                  "Japanese Ink Wash","Impressionist Garden","World War I",
+                  "Watercolor Skies","Rennaissance Tricycle","Rennaissance Duck",
+                  "Rennaissance Angels","Monet Flamingo","Dali","Rococo Unicorn",
+                  "New Year","Rembrandt selfie stick",
+                ].map((name, i) => (
+                  <option key={i} value={i}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
                 <span className="settings-label">AI Mode</span>
               </div>
               <select
@@ -1397,48 +1440,31 @@ const appendFeed = useCallback((message) => {
                   sendSetting("mode", v);
                 }}
               >
-                <option value={0}>0 — Gemini</option>
-                <option value={1}>1 — Gemini + SD</option>
-                <option value={2}>2 — AnimateDiff</option>
+                <option value={0}>Gemini</option>
+                <option value={1}>Gemini + SD</option>
+                <option value={2}>AnimateDiff</option>
               </select>
             </div>
 
             <div className="settings-section">
               <div className="settings-row">
                 <span className="settings-label">Ray Shape</span>
-                <span className="settings-value">{settingsShape}</span>
               </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min="0"
-                max="4"
-                step="1"
+              <select
+                className="settings-select"
                 value={settingsShape}
-                style={{ "--pct": sliderPct(settingsShape, 0, 4) }}
-                onChange={(e) => setSettingsShape(parseInt(e.target.value, 10))}
-                onMouseUp={(e) => sendSetting("shape", parseInt(e.target.value, 10))}
-                onTouchEnd={() => sendSetting("shape", settingsShape)}
-              />
-            </div>
-
-            <div className="settings-section">
-              <div className="settings-row">
-                <span className="settings-label">Field of View</span>
-                <span className="settings-value">{settingsZoom.toFixed(1)}</span>
-              </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min="0.1"
-                max="1.2"
-                step="0.1"
-                value={settingsZoom}
-                style={{ "--pct": sliderPct(settingsZoom, 0.1, 1.2) }}
-                onChange={(e) => setSettingsZoom(parseFloat(e.target.value))}
-                onMouseUp={(e) => sendSetting("zoom", parseFloat(e.target.value))}
-                onTouchEnd={() => sendSetting("zoom", settingsZoom)}
-              />
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setSettingsShape(v);
+                  sendSetting("shape", v);
+                }}
+              >
+                <option value={0}>Quad</option>
+                <option value={1}>Prism</option>
+                <option value={2}>Disc</option>
+                <option value={3}>Thread</option>
+                <option value={4}>Sphere</option>
+              </select>
             </div>
 
             <div className="settings-section settings-row">
@@ -1490,6 +1516,42 @@ const appendFeed = useCallback((message) => {
               >
                 <span className="settings-toggle__thumb" />
               </button>
+            </div>
+
+            <div className="settings-section settings-row">
+              <span className="settings-label">Auto Play</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settingsAutoPlay}
+                className={`settings-toggle${settingsAutoPlay ? " on" : ""}`}
+                onClick={() => {
+                  const next = !settingsAutoPlay;
+                  setSettingsAutoPlay(next);
+                  sendSetting("auto_play", next);
+                }}
+              >
+                <span className="settings-toggle__thumb" />
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">Zoom</span>
+                <span className="settings-value">{settingsZoom.toFixed(1)}</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min="0.1"
+                max="1.4"
+                step="0.1"
+                value={settingsZoom}
+                style={{ "--pct": sliderPct(settingsZoom, 0.1, 1.4) }}
+                onChange={(e) => setSettingsZoom(parseFloat(e.target.value))}
+                onMouseUp={(e) => sendSetting("zoom", parseFloat(e.target.value))}
+                onTouchEnd={() => sendSetting("zoom", settingsZoom)}
+              />
             </div>
 
           </div>

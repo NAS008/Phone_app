@@ -44,7 +44,7 @@ class Gemini:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.TEXT_MODEL = TEXT_MODEL
         self.IMAGE_MODEL = IMAGE_MODEL
-        self.STYLE = STYLE
+        self.STYLE = STYLE["long"] if isinstance(STYLE, dict) else STYLE
         print("✓ Gemini: unified text/image model ready")
 
     def _extract_text(self, response) -> str:

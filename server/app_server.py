@@ -26,6 +26,7 @@ from config import Config
 from bus import Bus
 from gemini import Gemini, GeminiImage, GeminiBlockedError
 from sd35 import StableDiffusion, AnimateDiff
+from director import Director
 
 def extract_first_text(parts):
     for part in parts or []:
@@ -69,12 +70,23 @@ async def main():
     bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
     await bus.connect()
 
+    current_style = list(config.STYLE.values())[0]
+
     gemini = Gemini(
         GEMINI_API_KEY=config.GEMINI_API_KEY,
         TEXT_MODEL=config.GEMINI_TEXT_MODEL,
         IMAGE_MODEL=config.GEMINI_IMAGE_MODEL,
-        STYLE = list(config.STYLE.values())[16],
+        STYLE=current_style["long"],
     )
+
+    director = Director(bus, gemini, config)
+    director.bind(lambda: (
+        current_session_id,
+        ai_mode,
+        current_style,
+        last_generated_image_bgr,
+        session_histories.get(str(current_session_id), []),
+    ))
 
     current_session_id = ""
     joined_users = set()
@@ -84,7 +96,6 @@ async def main():
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
-    ad_style = config.AD_STYLE[4]
 
     def get_sd():
         nonlocal _sd
@@ -136,6 +147,7 @@ async def main():
         nonlocal current_session_id, joined_users, last_generated_image_bgr
         current_session_id = str(session_id or "")
         joined_users.clear()
+        joined_users.add(Director.NICKNAME)   # Director is always a valid sender
         session_histories.clear()
         pending_parts.clear()
         last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
@@ -151,7 +163,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, ad_style
+        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, current_style
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -163,6 +175,11 @@ async def main():
             else:
                 print(f"✗ Server: ignored message from unjoined user '{nickname}'")
                 return
+
+        # A real human message stops the director
+        if nickname != Director.NICKNAME and director.enabled:
+            director.disable()
+            print("✓ Server: auto-play stopped by incoming user message")
 
         effective_session_id = session_id if str(session_id) == config.ADMIN_SESSION_ID else (current_session_id or session_id)
 
@@ -198,7 +215,8 @@ async def main():
             idx = random.randrange(len(config.MOTION_LORAS))
             lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
             loras = [(repo, lora_name, weight)] if repo else []
-            full_prompt = f"{prompt_text}, {hint}, {ad_style}" if hint else prompt_text
+            style_suffix = current_style["short"]
+            full_prompt = f"{prompt_text}, {hint}, {style_suffix}" if hint else f"{prompt_text}, {style_suffix}"
             entry = {
                 "prompt": full_prompt,
                 "negative": "close-up, indoor, blurry, watermark, text",
@@ -340,7 +358,7 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode
+        nonlocal current_session_id, ai_mode, current_style
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
         if "mode" in params:
@@ -350,8 +368,14 @@ async def main():
             idx = int(params["style_index"])
             style_values = list(config.STYLE.values())
             if 0 <= idx < len(style_values):
-                gemini.STYLE = style_values[idx]
-                print(f"✓ Server: style set to index {idx} ({list(config.STYLE.keys())[idx]})")
+                current_style = style_values[idx]
+                gemini.STYLE = current_style["long"]
+                print(f"✓ Server: style set to '{current_style['name']}'")
+        if "auto_play" in params:
+            if bool(params["auto_play"]):
+                director.enable()
+            else:
+                director.disable()
 
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)

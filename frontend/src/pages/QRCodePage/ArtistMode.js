@@ -364,6 +364,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsStyle, setSettingsStyle] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
   const [settingsZoom, setSettingsZoom] = useState(1.1);
+  const [settingsDepthFactor, setSettingsDepthFactor] = useState(1.0);
   const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
@@ -1550,6 +1551,25 @@ const appendFeed = useCallback((message) => {
                 onChange={(e) => setSettingsZoom(parseFloat(e.target.value))}
                 onMouseUp={(e) => sendSetting("zoom", parseFloat(e.target.value))}
                 onTouchEnd={() => sendSetting("zoom", settingsZoom)}
+              />
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">Depth Factor</span>
+                <span className="settings-value">{settingsDepthFactor.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min="0.0"
+                max="1.0"
+                step="0.01"
+                value={settingsDepthFactor}
+                style={{ "--pct": sliderPct(settingsDepthFactor, 0.0, 1.0) }}
+                onChange={(e) => setSettingsDepthFactor(parseFloat(e.target.value))}
+                onMouseUp={(e) => sendSetting("depth_factor", parseFloat(e.target.value))}
+                onTouchEnd={() => sendSetting("depth_factor", settingsDepthFactor)}
               />
             </div>
 

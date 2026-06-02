@@ -200,6 +200,7 @@ async def main():
     sim_constraints_on = True
     sim_go_back_on = True
     sim_gradient_on = False
+    sim_depth_factor = 1.0
     #img_a = cv2.imread(r"..\..\brand\logo_square.png")
     img_a = cv2.imread(r"..\..\input\19.png")
     if img_a is None:
@@ -226,7 +227,8 @@ async def main():
     ray_shape = 4
     frame = img_a.copy()
     frames = deque()
-    thumb_w, thumb_h = config.WINDOW_W // 2, config.WINDOW_H // 2
+    thumb_w = max(config.WINDOW_W // 8, 256)
+    thumb_h = int(thumb_w * config.WINDOW_H / config.WINDOW_W)
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
@@ -306,7 +308,7 @@ async def main():
         pointer_goal[2] = z
 
     async def on_settings(params):
-        nonlocal ray_shape, sim_constraints_on, sim_go_back_on
+        nonlocal ray_shape, sim_constraints_on, sim_go_back_on, sim_gradient_on, sim_depth_factor
 
         if 'constraints_on' in params:
             sim_constraints_on = bool(params['constraints_on'])
@@ -327,6 +329,10 @@ async def main():
         if 'zoom' in params:
             ray.fov = float(params['zoom'])
             print(f"✓ PC: ray zoom set to {ray.fov:.1f}")
+
+        if 'depth_factor' in params:
+            sim_depth_factor = float(params['depth_factor'])
+            print(f"✓ PC: sim depth factor set to {sim_depth_factor:.2f}")
 
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
@@ -409,7 +415,9 @@ async def main():
 
         if now >= next_release:
             if frames:
-                sim.new_image(frames.popleft())
+                sim.new_image(frames.popleft(), depth_factor=sim_depth_factor)
+            if sim_gradient_on:
+                sim.inject_gradient(depth_factor=sim_depth_factor)
             next_release += release_frame_dur
             if now > next_release + release_frame_dur:
                 next_release = now + release_frame_dur
@@ -449,20 +457,17 @@ async def main():
         vz = 0.15 * np.hypot(main._vx, main._vy)
         sim.inject_mouse(pointer, [main._vx, main._vy, vz])
 
-        if sim_gradient_on:
-            sim.inject_gradient()
-
         sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
         if ray_shape == 0:
             frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
         elif ray_shape == 1:
-            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.9 * sim.r, 0.9 * sim.r, 6.0 * sim.r)
+            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.8 * sim.r, 0.8 * sim.r, 8.0 * sim.r)
         elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.6 * sim.r)
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.8 * sim.r, 1.8 * sim.r, 0.6 * sim.r)
         elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
         else:
-            frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
+            frame = ray.sphere(sim.xyz, sim.rgb, 1.2 * sim.r)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:

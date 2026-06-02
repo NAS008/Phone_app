@@ -408,7 +408,7 @@ def raytrace_sphere(
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + (1.0 - ambient) * diffuse * shadow_factor)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
 
         accum_r += pixel[0]
         accum_g += pixel[1]
@@ -635,7 +635,7 @@ def raytrace_quad(
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + (1.0 - ambient) * diffuse * shadow_factor)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
 
         accum_r += pixel[0]; accum_g += pixel[1]; accum_b += pixel[2]
 

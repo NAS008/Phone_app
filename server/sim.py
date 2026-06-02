@@ -165,22 +165,23 @@ def k_set_velocity_fluid(
     idx = i + G.x*j + G.x*G.y*k
     l = lum[id2]
     scale = float(k) / float(G.z)
-    # u_prev[idx] = -grad_y[id2] * strength * l * scale * 2.0
-    # v_prev[idx] = grad_x[id2] * strength * l * scale * 2.0
-    # #w_prev[idx] = l * strength * (0.5 - scale) * 1.0
-    # sign = float(1) if i % 10 < 5 else float(-1)
-    # w_prev[idx] = sign * 2.0 * l * strength * float(k) / float(depth_max)
-    # if i % 10 < 5:
-    #     v_prev[idx] -= (2.5 if j < G.y//2 else 0.5) * l * strength
-    # else:
-    #     if j < G.y//2:
-    #         v_prev[idx] += 0.5 * l * strength
-    #     else:
-    #         u_prev[idx] -= 0.5 * l * strength
 
-    u_prev[idx] = -grad_y[id2] * strength * l * 8.0
-    v_prev[idx] = grad_x[id2] * strength * l * 8.0
-    w_prev[idx] = l * strength * (0.5 - scale) * 2.0
+    u_prev[idx] = -grad_y[id2] * strength * l * scale * 2.0
+    v_prev[idx] = grad_x[id2] * strength * l * scale * 2.0
+    #w_prev[idx] = l * strength * (0.5 - scale) * 1.0
+    sign = float(1) if i % 10 < 5 else float(-1)
+    w_prev[idx] = sign * 2.0 * l * strength * float(k) / float(depth_max)
+    if i % 10 < 5:
+        v_prev[idx] -= (2.5 if j < G.y//2 else 0.5) * l * strength
+    else:
+        if j < G.y//2:
+            v_prev[idx] += 0.5 * l * strength
+        else:
+            u_prev[idx] -= 0.5 * l * strength
+
+    # u_prev[idx] = -grad_y[id2] * strength * l * 8.0
+    # v_prev[idx] = grad_x[id2] * strength * l * 8.0
+    # w_prev[idx] = l * strength * (0.5 - scale) * 2.0
 
 @wp.kernel
 def k_update_rotation(
@@ -437,7 +438,7 @@ class Simulator:
     def __init__(self,
         IMAGE_SIZE=512, PIXELS_PER_CELL=4,
         G=[128, 128, 32], L=1, smooth=15,
-        gradient_strength=0.1, pressure_steps=10, jacobi=0.1, dt=0.5
+        gradient_strength=0.05, pressure_steps=10, jacobi=0.1, dt=0.2
     ):
         self.G = wp.vec3i(*G)
         self.h = 1.0 / max(self.G.x, self.G.y)    

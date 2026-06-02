@@ -154,10 +154,13 @@ class Director:
         await asyncio.sleep(self.config.DIRECTOR_SCENE_INTERVAL)
         while self._enabled:
             try:
-                if random.random() < 0.5:
+                roll = random.random()
+                if roll < 0.33:
                     await self._change_shape()
-                else:
+                elif roll < 0.66:
                     await self._sweep_pointer()
+                else:
+                    await self._change_style()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -168,6 +171,12 @@ class Director:
         new_shape = random.randint(0, 4)
         print(f"✓ Director: changing ray shape → {new_shape}")
         await self.bus.publish_settings(shape=new_shape)
+
+    async def _change_style(self):
+        styles = list(self.config.STYLE.keys())
+        idx = random.randrange(len(styles))
+        print(f"✓ Director: changing style → {styles[idx]}")
+        await self.bus.publish_settings(style_index=idx)
 
     async def _sweep_pointer(self):
         """Catmull-Rom spline through random points, published as USER_GESTURE."""

@@ -755,7 +755,6 @@ const appendFeed = useCallback((message) => {
       }
     },
     [
-      appendFeed,
       clearAudioWidgetTimers,
       flashNotice,
       nickname,

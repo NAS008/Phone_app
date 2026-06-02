@@ -1387,20 +1387,20 @@ const appendFeed = useCallback((message) => {
             <div className="settings-section">
               <div className="settings-row">
                 <span className="settings-label">AI Mode</span>
-                <span className="settings-value">{settingsMode}</span>
               </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min="0"
-                max="2"
-                step="1"
+              <select
+                className="settings-select"
                 value={settingsMode}
-                style={{ "--pct": sliderPct(settingsMode, 0, 2) }}
-                onChange={(e) => setSettingsMode(parseInt(e.target.value, 10))}
-                onMouseUp={(e) => sendSetting("mode", parseInt(e.target.value, 10))}
-                onTouchEnd={() => sendSetting("mode", settingsMode)}
-              />
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setSettingsMode(v);
+                  sendSetting("mode", v);
+                }}
+              >
+                <option value={0}>0 — Gemini</option>
+                <option value={1}>1 — Gemini + SD</option>
+                <option value={2}>2 — AnimateDiff</option>
+              </select>
             </div>
 
             <div className="settings-section">

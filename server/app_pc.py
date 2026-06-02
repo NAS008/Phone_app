@@ -226,7 +226,7 @@ async def main():
     ray_shape = 4
     frame = img_a.copy()
     frames = deque()
-    thumb_size = config.IMAGE_SIZE // 2
+    thumb_w, thumb_h = config.WINDOW_W // 2, config.WINDOW_H // 2
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
@@ -460,11 +460,11 @@ async def main():
         elif ray_shape == 2:
             frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.6 * sim.r)
         elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
         else:
             frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
 
-        thumb = cv2.resize(frame, (thumb_size, thumb_size), interpolation=cv2.INTER_AREA)
+        thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
             last_frames.append(thumb)
             gif_last_frame = thumb

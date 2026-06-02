@@ -10,7 +10,7 @@ class Config:
     PHONE_NAME = "PHONE"
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
-    WINDOW_W, WINDOW_H = 3840, 2560
+    WINDOW_W, WINDOW_H = 1080, 1080#3840, 2560
     IMAGE_SIZE = 512
     GRID_SIZE = 128
     PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
@@ -27,10 +27,10 @@ class Config:
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
     light = [0.5 * GX / max(GX, GY), 1.0 * GY / max(GX, GY), 0.5]    
     fov = 1.2
-    samples = 4
+    samples = 1
     background = [0.0, 0.0, 0.0]
     ambient = 0.6
-    shadow = 0.2
+    shadow = 0.0
     FPS = 12
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
 
@@ -39,10 +39,6 @@ class Config:
     
     # Context
     CONTEXT_SIZE = 20  # max conversation turns kept per session
-
-    # Auto-generation
-    AUTO_GEN_IDLE_SECONDS = 30  # seconds of user inactivity before auto-gen kicks in
-    AUTO_GEN_MAX_QUEUE_FRAMES = 120  # pause generation when PC display queue exceeds this
 
     # Phone backend (for direct HTTP uploads that bypass the bus)
     PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
@@ -131,19 +127,19 @@ class Config:
         "Rembrandt selfie stick": "SCENE: Transform *MAIN SUBJECTS* in [Image] into persons in center of wealthy merchant group painting, all formally posed in dark interior with dramatic window light, but person is holding a modern selfie stick extended toward viewer. Create a Rembrandt-style Dutch Golden Age group portrait. Chiaroscuro lighting with dark background and illuminated faces. Rich blacks and warm golden highlights. Classical Dutch interior with map on wall. *MAIN SUBJECTS* FACES: Preserve original facial proportions, bone structure, and identity. You may freely modify bodies, poses, clothing, hairstyles, background, and all other elements to fit the scene perfectly. Maintain realistic lighting and shadows that match the scene. Ensure enhancements look natural and photorealistic. ADD ELEMENTS: Add elements from {transcript}. Dress in 17th century Dutch merchant clothing (black doublet with white lace collar, black hat with feather). Add elaborate ruff collar. Add serious, dignified expression typical of Dutch portraits. Add modern smartphone on extended selfie stick held prominently with screen glowing. Add other period-dressed figures arranged formally behind looking confused at device. Add dramatic Rembrandt lighting from window highlighting face and selfie stick.",        
     }
     AD_STYLE = [
-        "by Van Gogh, inpasto strokes"
-        "by Theo Jansenvery, kinetic machines"
-        "by Mario Giacomelli, black and white"
-        "by Karl Blossfeldt, botanical photography"
-        "by Hiroshi Sugimoto, minimalist polarized color"        
-        "by Ellsworth Kelly, vibrant color field minimalism" # Vivid, saturated color blocks with sharp geometric shapes
-        "by Edward Hopper, minimal color composition" # Earthy, rich cinematic tones with isolated subjects and heavy shadows
-        "by James Turrell, minimalist neon light art" # Pastel gradients, soft light, and vast atmospheric negative space
-        "by Giorgio Morandi, muted color still life minimalism" # Chalky, muted, monochromatic pastel palettes with rough textures
-        "by Lewis Baltz, new topographics color photography" # Dusty desert tones, high exposure, and sharp architectural shadows
-        "by Georgia O'Keeffe, minimalist abstract color" # Deep indigo blues, whites, and serene organic compositions
-        "by Patrick Caulfield, graphic minimalism color" # High-contrast pop color blocks with bold, clean outlines
-        "by Michael Kenna, minimal color photography" # Foggy, soft focus, desaturated melancholic tones with isolated subjects
+        "by Van Gogh, inpasto strokes",
+        "by Theo Jansenvery, kinetic machines",
+        "by Mario Giacomelli, black and white",
+        "by Karl Blossfeldt, botanical photography",
+        "by Hiroshi Sugimoto, minimalist polarized color",       
+        "by Ellsworth Kelly, vibrant color field minimalism", # Vivid, saturated color blocks with sharp geometric shapes
+        "by Edward Hopper, minimal color composition", # Earthy, rich cinematic tones with isolated subjects and heavy shadows
+        "by James Turrell, minimalist neon light art", # Pastel gradients, soft light, and vast atmospheric negative space
+        "by Giorgio Morandi, muted color still life minimalism", # Chalky, muted, monochromatic pastel palettes with rough textures
+        "by Lewis Baltz, new topographics color photography", # Dusty desert tones, high exposure, and sharp architectural shadows
+        "by Georgia O'Keeffe, minimalist abstract color", # Deep indigo blues, whites, and serene organic compositions
+        "by Patrick Caulfield, graphic minimalism color", # High-contrast pop color blocks with bold, clean outlines
+        "by Michael Kenna, minimal color photography", # Foggy, soft focus, desaturated melancholic tones with isolated subjects
     ]
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
@@ -156,29 +152,4 @@ class Config:
         ("roll-cw",  0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
         ("roll-ccw", 0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
         (None,       None, "sways gently in the wind",    None),
-    ]
-    SUBJECTS = [
-        "colossal shell",
-        #"tiny abandoned house floating",
-        #"jellyfish beneath a hot air balloon",
-        #"tiny seagulls in the horizon",
-        "colossal ivory white sculptural on the beach",
-        #"a giant ship stuck in the sand",
-        "giant wave",
-        "person with pomegranate diving helmet and scarf on the desert",
-        #"person with thick black goggles and indigo blue scarf on the desert",
-        #"person with thick black goggles and covid mask on orange desert",
-        "colossal barnacled shell",
-        #"kinetic sculpture on the beach",
-        #"crowd of people rushing on the orange subway",
-        #"crowd of people with red kart in supermarket",
-        #"crowd of people with shopping carts in crowded supermarket",
-        #"birds eye of beach",
-        #"birds eye of crowded city with red bridges",
-        #"colossal red coral sculpture on the beach",
-        #"colossal sea anemone in the desert",
-        "pufferfish flying in the sky like a balloon",
-        #"waterfall in forest",
-        #"alien ship in the sea",
-        #"rusty toaster on the beach",
     ]

@@ -310,14 +310,20 @@ async def main():
             print(f"✓ Server: Gemini image {kb} KB — {prompt_used}")
             history.append({"role": "model", "parts": [{"kind": "text", "text": f"[Image generated: {prompt_used}]"}]})
 
-            if ai_mode == 1 and last_generated_image_bgr is not None:
+            # Capture old image and update immediately so any concurrent Director cycle
+            # sees the new image as its starting point rather than replaying the same transition.
+            prev_bgr = last_generated_image_bgr
+            last_generated_image_bgr = new_bgr
+
+            if ai_mode == 1:
                 # SD journey: stream each interpolation frame to PC as it's generated.
-                prev_bgr = last_generated_image_bgr
+                # Use the short style for SD — the long style exceeds the CLIP 77-token limit.
+                sd_prompt = current_style.get("short") or " ".join(prompt_used.split()[:40])
                 q = asyncio.Queue()
 
                 def sd_worker():
                     try:
-                        for frame in get_sd().generate_between_images(prev_bgr, new_bgr, prompt_used):
+                        for frame in get_sd().generate_between_images(prev_bgr, new_bgr, sd_prompt):
                             loop.call_soon_threadsafe(q.put_nowait, frame)
                     except Exception as exc:
                         print(f"✗ Server: SD generate_between_images failed: {exc}")
@@ -338,14 +344,12 @@ async def main():
                     frame_count += 1
                 print(f"✓ Server: SD journey published {frame_count} frames to PC")
             else:
-                # Mode 0, or mode 1 without a prior image: send Gemini result directly.
+                # Mode 0: send Gemini result directly.
                 await bus.publish_ai_message_to_pc(
                     session_id=effective_session_id, nickname="NonCarbon Artist",
                     image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
                     image_purpose="output", turn_id=turn_id,
                 )
-
-            last_generated_image_bgr = new_bgr
 
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",

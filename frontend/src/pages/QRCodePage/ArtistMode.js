@@ -368,6 +368,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
+  const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
   const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
 
   const galleryInputRef = useRef(null);
@@ -1513,6 +1514,23 @@ const appendFeed = useCallback((message) => {
                   const next = !settingsGradientOn;
                   setSettingsGradientOn(next);
                   sendSetting("gradient_on", next);
+                }}
+              >
+                <span className="settings-toggle__thumb" />
+              </button>
+            </div>
+
+            <div className="settings-section settings-row">
+              <span className="settings-label">Show QR Code</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settingsOverlayOn}
+                className={`settings-toggle${settingsOverlayOn ? " on" : ""}`}
+                onClick={() => {
+                  const next = !settingsOverlayOn;
+                  setSettingsOverlayOn(next);
+                  sendSetting("overlay_on", next);
                 }}
               >
                 <span className="settings-toggle__thumb" />

@@ -26,6 +26,8 @@
 
 import cv2
 import io
+import ssl
+import os
 import urllib.request
 import urllib.parse
 import numpy as np
@@ -101,9 +103,20 @@ async def _start_stream_server(frame_bus, config):
     app.on_shutdown.append(_on_stream_shutdown)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
+
+    _here = os.path.dirname(os.path.abspath(__file__))
+    cert_file = os.path.join(_here, "cert.pem")
+    key_file  = os.path.join(_here, "key.pem")
+    ssl_ctx = None
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(cert_file, key_file)
+        print("✓ PC: SSL enabled (cert.pem / key.pem)")
+
+    site = web.TCPSite(runner, "0.0.0.0", 8080, ssl_context=ssl_ctx)
     await site.start()
-    print("✓ PC: WebRTC stream server listening on :8080")
+    proto = "https" if ssl_ctx else "http"
+    print(f"✓ PC: WebRTC stream server listening on {proto}://0.0.0.0:8080")
     return runner
 
 def get_first_part(parts, kind):

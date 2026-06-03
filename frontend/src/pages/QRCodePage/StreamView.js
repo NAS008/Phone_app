@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import "./StreamView.css";
 
 const OFFER_URL =
-  (process.env.REACT_APP_STREAM_URL || "http://192.168.68.65:8080") + "/offer";
+  (process.env.REACT_APP_STREAM_URL || "https://192.168.68.65:8080") + "/offer";
 
 const CloseIcon = (props) => (
   <svg

@@ -1,6 +1,8 @@
 # Secrets
 .env
 *.env
+server/cert.pem
+server/key.pem
 
 # Python
 __pycache__/

@@ -130,6 +130,26 @@ def overlay(frame, overlay_img, proportion=16, alignment="center"):
     out[y0:y0+h, x0:x0+w] = blended.astype(out.dtype)
     return out
 
+def resize_to_fit_window(img, window_w, window_h):
+    target_w = window_w
+    target_h = window_h
+
+    img_h, img_w = img.shape[:2]
+
+    scale = min(float(target_w) / float(img_w), float(target_h) / float(img_h))
+    new_w = max(1, int(round(img_w * scale)))
+    new_h = max(1, int(round(img_h * scale)))
+
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+
+    frame = np.zeros((target_h, target_w, 3), dtype=img.dtype)
+
+    x0 = (target_w - new_w) // 2
+    y0 = (target_h - new_h) // 2
+
+    frame[y0:y0 + new_h, x0:x0 + new_w] = resized
+    return frame
+
 class LowPass:
     def __init__(self, x0=0.0):
         self.y = x0
@@ -415,59 +435,65 @@ async def main():
 
         if now >= next_release:
             if frames:
-                sim.new_image(frames.popleft(), depth_factor=sim_depth_factor)
-            if sim_gradient_on:
+                img_a = frames.popleft()
+                if ray_shape != 5:
+                    sim.new_image(img_a, depth_factor=sim_depth_factor)
+            if sim_gradient_on and ray_shape != 5:
                 sim.inject_gradient(depth_factor=sim_depth_factor)
             next_release += release_frame_dur
             if now > next_release + release_frame_dur:
                 next_release = now + release_frame_dur
 
-        if pc_cam_on:
-            ok, canvas, frame, result = cam.read()
-            if not ok:
-                continue
-
-            hand = cam.get_hand_raw(result)
-            if hand is not None:
-                raw_x = float(np.clip(hand["x"], 0.0, 1.0))
-                raw_y = float(np.clip(1.0 - hand["y"], 0.0, 1.0))
-
-                pointer_goal[0] = fx.apply(raw_x, now)
-                pointer_goal[1] = fy.apply(raw_y, now)
-
-        pointer_prior_x = pointer[0]
-        pointer_prior_y = pointer[1]
-        follow = 0.18
-        pointer[0] += follow * (pointer_goal[0] - pointer[0])
-        pointer[1] += follow * (pointer_goal[1] - pointer[1])
-        dt = render_frame_dur
-        vx = (pointer[0] - pointer_prior_x) / max(dt, 1e-6)
-        vy = (pointer[1] - pointer_prior_y) / max(dt, 1e-6)
-        # clamp spikes
-        vmax = 1.5
-        vx = float(np.clip(vx, -vmax, vmax))
-        vy = float(np.clip(vy, -vmax, vmax))
-        # optional extra smoothing
-        vel_smooth = 0.25
-        if not hasattr(main, "_vx"):
-            main._vx = 0.0
-            main._vy = 0.0
-        main._vx += vel_smooth * (vx - main._vx)
-        main._vy += vel_smooth * (vy - main._vy)
-        vz = 0.15 * np.hypot(main._vx, main._vy)
-        sim.inject_mouse(pointer, [main._vx, main._vy, vz])
-
-        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
-        if ray_shape == 0:
-            frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
-        elif ray_shape == 1:
-            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.8 * sim.r, 0.8 * sim.r, 8.0 * sim.r)
-        elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.8 * sim.r, 1.8 * sim.r, 0.6 * sim.r)
-        elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
+        if ray_shape == 5:
+            frame = resize_to_fit_window(img_a, config.WINDOW_W, config.WINDOW_H)
         else:
-            frame = ray.sphere(sim.xyz, sim.rgb, 1.2 * sim.r)
+            if pc_cam_on:
+                ok, canvas, frame, result = cam.read()
+                if not ok:
+                    continue
+
+                hand = cam.get_hand_raw(result)
+                if hand is not None:
+                    raw_x = float(np.clip(hand["x"], 0.0, 1.0))
+                    raw_y = float(np.clip(1.0 - hand["y"], 0.0, 1.0))
+
+                    pointer_goal[0] = fx.apply(raw_x, now)
+                    pointer_goal[1] = fy.apply(raw_y, now)
+
+            pointer_prior_x = pointer[0]
+            pointer_prior_y = pointer[1]
+            follow = 0.18
+            pointer[0] += follow * (pointer_goal[0] - pointer[0])
+            pointer[1] += follow * (pointer_goal[1] - pointer[1])
+            dt = render_frame_dur
+            vx = (pointer[0] - pointer_prior_x) / max(dt, 1e-6)
+            vy = (pointer[1] - pointer_prior_y) / max(dt, 1e-6)
+            # clamp spikes
+            vmax = 1.5
+            vx = float(np.clip(vx, -vmax, vmax))
+            vy = float(np.clip(vy, -vmax, vmax))
+            # optional extra smoothing
+            vel_smooth = 0.25
+            if not hasattr(main, "_vx"):
+                main._vx = 0.0
+                main._vy = 0.0
+            main._vx += vel_smooth * (vx - main._vx)
+            main._vy += vel_smooth * (vy - main._vy)
+            vz = 0.15 * np.hypot(main._vx, main._vy)
+            sim.inject_mouse(pointer, [main._vx, main._vy, vz])
+
+            sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
+
+            if ray_shape == 0:
+                frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
+            elif ray_shape == 1:
+                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.8 * sim.r, 0.8 * sim.r, 8.0 * sim.r)
+            elif ray_shape == 2:
+                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.8 * sim.r, 1.8 * sim.r, 0.6 * sim.r)
+            elif ray_shape == 3:
+                frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
+            else:
+                frame = ray.sphere(sim.xyz, sim.rgb, 1.2 * sim.r)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:

@@ -296,7 +296,7 @@ def shadow_sphere(
 @wp.kernel
 def raytrace_sphere(
     xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), r: float,
-    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, background: wp.vec3, ambient: float, shadow: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
     camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
 ):
@@ -307,20 +307,28 @@ def raytrace_sphere(
 
     for s in range(samples):
         pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
         jx = float(0.0)
         jy = float(0.0)
+
         if samples > 1:
             rng = wp.rand_init(seed, s)
-            jx  = wp.randf(rng) - 0.5
-            jy  = wp.randf(rng) - 0.5
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
 
         if aspect >= 1.0:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov / aspect
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
         else:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov * aspect
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov
-        ray_dir    = wp.normalize(fwd + right*u + up*v)
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
         ray_origin = camera
 
         inv_dir = wp.vec3(
@@ -423,15 +431,12 @@ def raytrace_sphere(
 @wp.func
 def dir_to_mat(dir: wp.vec3) -> wp.mat33:
     fwd = wp.normalize(dir)
-
-    if wp.abs(fwd[1]) < 0.99:
-        world_up = wp.vec3(0.0, 1.0, 0.0)
-    else:
-        world_up = wp.vec3(0.0, 0.0, 1.0)
-
-    right = wp.normalize(wp.cross(world_up, fwd))
-    up    = wp.normalize(wp.cross(fwd, right))
-
+    # Frisvad / Pixar ONB — no branch, numerically stable everywhere
+    sign = 1.0 if fwd[2] >= 0.0 else -1.0
+    a = -1.0 / (sign + fwd[2])
+    b = fwd[0] * fwd[1] * a
+    right = wp.vec3(1.0 + sign * fwd[0] * fwd[0] * a, sign * b, -sign * fwd[0])
+    up    = wp.vec3(b, sign + fwd[1] * fwd[1] * a, -fwd[1])
     return wp.mat33(
         right[0], up[0], fwd[0],
         right[1], up[1], fwd[1],
@@ -531,7 +536,7 @@ def shadow_quad(
 @wp.kernel
 def raytrace_quad(
     xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), r: float,
-    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, background: wp.vec3, ambient: float, shadow: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
     camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
 ):
@@ -542,19 +547,28 @@ def raytrace_quad(
 
     for s in range(samples):
         pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
         jx = float(0.0)
         jy = float(0.0)
+
         if samples > 1:
             rng = wp.rand_init(seed, s)
-            jx  = wp.randf(rng) - 0.5
-            jy  = wp.randf(rng) - 0.5
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+
         if aspect >= 1.0:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov / aspect
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
         else:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov * aspect
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov
-        ray_dir    = wp.normalize(fwd + right*u + up*v)
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
         ray_origin = camera
 
         inv_dir = wp.vec3(
@@ -630,7 +644,7 @@ def raytrace_quad(
             if diffuse > 0.0:
                 if shadow_quad(
                     xyz, rot, r,
-                    hit_pt + normal * h * 0.1, light_dir, wp.length(light - hit_pt),
+                    hit_pt + normal * h * 0.01, light_dir, wp.length(light - hit_pt),
                     h, G, cell_start, cell_count, particle_ids
                 ):
                     shadow_factor = shadow
@@ -763,7 +777,7 @@ def shadow_ellipsoid(
 @wp.kernel
 def raytrace_ellipsoid(
     xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), rx: float, ry: float, rz: float,
-    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, background: wp.vec3, ambient: float, shadow: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
     camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
 ):
@@ -774,20 +788,28 @@ def raytrace_ellipsoid(
 
     for s in range(samples):
         pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
         jx = float(0.0)
         jy = float(0.0)
+
         if samples > 1:
             rng = wp.rand_init(seed, s)
-            jx  = wp.randf(rng) - 0.5
-            jy  = wp.randf(rng) - 0.5
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
 
         if aspect >= 1.0:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov / aspect
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
         else:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov * aspect
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov
-        ray_dir    = wp.normalize(fwd + right*u + up*v)
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
         ray_origin = camera
 
         inv_dir = wp.vec3(
@@ -867,7 +889,7 @@ def raytrace_ellipsoid(
             if diffuse > 0.0:
 
                 # SHAPE LINE 4
-                shadow_origin = hit_pt + normal * h * 0.1
+                shadow_origin = hit_pt + normal * wp.max(rx, wp.max(ry, rz)) * 0.005
                 if shadow_ellipsoid(
                     xyz, rot, rx, ry, rz,
                     shadow_origin, light_dir, wp.length(light - hit_pt),
@@ -1004,7 +1026,7 @@ def shadow_prism(
 @wp.kernel
 def raytrace_prism(
     xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), rx: float, ry: float, rz: float,
-    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, background: wp.vec3, ambient: float, shadow: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
     camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
 ):
@@ -1015,20 +1037,28 @@ def raytrace_prism(
 
     for s in range(samples):
         pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
         jx = float(0.0)
         jy = float(0.0)
+
         if samples > 1:
             rng = wp.rand_init(seed, s)
-            jx  = wp.randf(rng) - 0.5
-            jy  = wp.randf(rng) - 0.5
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
 
         if aspect >= 1.0:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov / aspect
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
         else:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov * aspect
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov
-        ray_dir    = wp.normalize(fwd + right*u + up*v)
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
         ray_origin = camera
 
         inv_dir = wp.vec3(
@@ -1105,10 +1135,10 @@ def raytrace_prism(
             diffuse   = wp.max(0.0, wp.dot(normal, light_dir))
             shadow_factor = float(1.0)
             if diffuse > 0.0:
-                shadow_origin = hit_pt + normal * h * 0.1
                 light_dist    = wp.length(light - hit_pt)
                 
                 # SHAPE LINE 3 (shadow func name)
+                shadow_origin = hit_pt + normal * wp.max(rx, wp.max(ry, rz)) * 0.005
                 if shadow_prism(
                     xyz, rot, rx, ry, rz,
                     shadow_origin, light_dir, light_dist,
@@ -1233,31 +1263,19 @@ def intersect_cylinder(
     return closest_t
 
 @wp.func
-def normal_cylinder(
-    hit_point: wp.vec3,
-    p0: wp.vec3,
-    p1: wp.vec3
-) -> wp.vec3:
+def normal_cylinder(hit_point: wp.vec3, p0: wp.vec3, p1: wp.vec3) -> wp.vec3:
     line_dir = p1 - p0
     line_length = wp.length(line_dir)
-    
     if line_length < 1e-6:
         return wp.normalize(hit_point - p0)
-    
     line_axis = line_dir / line_length
-    proj_on_axis = wp.dot(hit_point - p0, line_axis)
-    
-    # Cap at p0
-    if proj_on_axis <= 0.0:
+    proj = wp.dot(hit_point - p0, line_axis)
+    eps = line_length * 0.01          # 1% of segment length
+    if proj <= eps:
         return wp.normalize(hit_point - p0)
-    
-    # Cap at p1
-    if proj_on_axis >= line_length:
+    if proj >= line_length - eps:
         return wp.normalize(hit_point - p1)
-    
-    # Cylinder body
-    closest_point = p0 + line_axis * proj_on_axis
-    return wp.normalize(hit_point - closest_point)
+    return wp.normalize(hit_point - (p0 + line_axis * proj))
 
 @wp.func
 def shadow_cylinder(
@@ -1337,7 +1355,7 @@ def shadow_cylinder(
 @wp.kernel
 def raytrace_cylinder(
     xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), next: wp.array(dtype=int), r: float,
-    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, background: wp.vec3, ambient: float, shadow: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
     camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
 ):
@@ -1348,20 +1366,28 @@ def raytrace_cylinder(
 
     for s in range(samples):
         pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
         jx = float(0.0)
         jy = float(0.0)
+
         if samples > 1:
             rng = wp.rand_init(seed, s)
-            jx  = wp.randf(rng) - 0.5
-            jy  = wp.randf(rng) - 0.5
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
 
         if aspect >= 1.0:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov / aspect
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
         else:
-            u = ((float(x) + 0.5 + 0.5 * jx) / float(W) - 0.5) * fov * aspect
-            v = -((float(y) + 0.5 + 0.5 * jy) / float(H) - 0.5) * fov
-        ray_dir    = wp.normalize(fwd + right*u + up*v)
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
         ray_origin = camera
 
         inv_dir = wp.vec3(
@@ -1457,9 +1483,10 @@ def raytrace_cylinder(
             if diffuse > 0.0:
 
                 # SHAPE LINE 3
+                shadow_origin = hit_pt + normal * r * 0.005
                 if shadow_cylinder(
                     xyz, next, r,
-                    hit_pt + normal * h * 0.1, light_dir, wp.length(light - hit_pt),
+                    shadow_origin, light_dir, wp.length(light - hit_pt),
                     h, G, cell_start, cell_count, particle_ids
                 ):
                     shadow_factor = shadow
@@ -1494,6 +1521,7 @@ class RayTracer:
         self.up = wp.cross(self.right, self.fwd)
 
         self.samples = samples
+        self.sqrtN = int(wp.ceil(wp.sqrt(float(samples))))
         self.background = wp.vec3(*background)
         self.ambient = ambient
         self.shadow = shadow
@@ -1502,7 +1530,7 @@ class RayTracer:
         self.grid.build(len(xyz), k_insert, k_fill, [xyz, r], [xyz, r])
         wp.launch(raytrace_sphere, dim=(self.W, self.H), inputs=[
             xyz, rgb, r,
-            self.img, self.W, self.H, self.samples, self.background, self.ambient, self.shadow,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")
@@ -1513,7 +1541,7 @@ class RayTracer:
         self.grid.build(len(xyz), k_insert_oriented, k_fill_oriented, [xyz, rot, r, r, 0.0], [xyz, rot, r, r, 0.0])
         wp.launch(raytrace_quad, dim=(self.W, self.H), inputs=[
             xyz, rgb, rot, r,
-            self.img, self.W, self.H, self.samples, self.background, self.ambient, self.shadow,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")
@@ -1524,7 +1552,7 @@ class RayTracer:
         self.grid.build(len(xyz), k_insert_oriented, k_fill_oriented, [xyz, rot, rx, ry, rz], [xyz, rot, rx, ry, rz])
         wp.launch(raytrace_prism, dim=(self.W, self.H), inputs=[
             xyz, rgb, rot, rx, ry, rz,
-            self.img, self.W, self.H, self.samples, self.background, self.ambient, self.shadow,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")
@@ -1535,7 +1563,7 @@ class RayTracer:
         self.grid.build(len(xyz), k_insert_oriented, k_fill_oriented, [xyz, rot, rx, ry, rz], [xyz, rot, rx, ry, rz])
         wp.launch(raytrace_ellipsoid, dim=(self.W, self.H), inputs=[
             xyz, rgb, rot, rx, ry, rz,
-            self.img, self.W, self.H, self.samples, self.background, self.ambient, self.shadow,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")
@@ -1546,7 +1574,7 @@ class RayTracer:
         self.grid.build(len(xyz), k_insert_line, k_fill_line, [xyz, next, r], [xyz, next, r])
         wp.launch(raytrace_cylinder, dim=(self.W, self.H), inputs=[
             xyz, rgb, next, r,
-            self.img, self.W, self.H, self.samples, self.background, self.ambient, self.shadow,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")

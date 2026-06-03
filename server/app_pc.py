@@ -42,7 +42,7 @@ from config import Config
 from session import Session
 from bus import Bus
 from ray import RayTracer
-from sd35 import OpticalFlow
+from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera
 ctypes.windll.user32.SetProcessDPIAware()
@@ -136,18 +136,19 @@ def resize_to_fit_window(img, window_w, window_h):
 
     img_h, img_w = img.shape[:2]
 
-    scale = min(float(target_w) / float(img_w), float(target_h) / float(img_h))
+    # Scale to cover the whole target area
+    scale = max(float(target_w) / float(img_w), float(target_h) / float(img_h))
     new_w = max(1, int(round(img_w * scale)))
     new_h = max(1, int(round(img_h * scale)))
 
     resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
 
-    frame = np.zeros((target_h, target_w, 3), dtype=img.dtype)
+    # Center-crop to exact window size
+    x0 = max(0, (new_w - target_w) // 2)
+    y0 = max(0, (new_h - target_h) // 2)
 
-    x0 = (target_w - new_w) // 2
-    y0 = (target_h - new_h) // 2
+    frame = resized[y0:y0 + target_h, x0:x0 + target_w]
 
-    frame[y0:y0 + new_h, x0:x0 + new_w] = resized
     return frame
 
 class LowPass:
@@ -210,11 +211,13 @@ async def main():
     pointer = [0.5, 0.5, 0.0]
     pointer_goal = [0.5, 0.5, 0.0]
 
+    overlay_on = True
+
     # Simulator setup
     sim = Simulator(
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
-        G=config.G, L=1,
+        G=config.G, L=3,
         smooth=15,
     )
     sim_constraints_on = True
@@ -252,6 +255,8 @@ async def main():
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
+
+    super = SuperResolution(config.MODELS_FOLDER)
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -328,7 +333,7 @@ async def main():
         pointer_goal[2] = z
 
     async def on_settings(params):
-        nonlocal ray_shape, sim_constraints_on, sim_go_back_on, sim_gradient_on, sim_depth_factor
+        nonlocal ray_shape, sim_constraints_on, sim_go_back_on, sim_gradient_on, sim_depth_factor, overlay_on
 
         if 'constraints_on' in params:
             sim_constraints_on = bool(params['constraints_on'])
@@ -353,6 +358,10 @@ async def main():
         if 'depth_factor' in params:
             sim_depth_factor = float(params['depth_factor'])
             print(f"✓ PC: sim depth factor set to {sim_depth_factor:.2f}")
+        
+        if 'overlay_on' in params:
+            overlay_on = bool(params['overlay_on'])
+            print(f"✓ PC: overlay set to {overlay_on}")
 
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
@@ -438,14 +447,14 @@ async def main():
                 img_a = frames.popleft()
                 if ray_shape != 5:
                     sim.new_image(img_a, depth_factor=sim_depth_factor)
-            if sim_gradient_on and ray_shape != 5:
-                sim.inject_gradient(depth_factor=sim_depth_factor)
             next_release += release_frame_dur
             if now > next_release + release_frame_dur:
                 next_release = now + release_frame_dur
 
-        if ray_shape == 5:
-            frame = resize_to_fit_window(img_a, config.WINDOW_W, config.WINDOW_H)
+        if ray_shape == 5:         
+            img_aux = cv2.resize(img_a, (config.IMAGE_SIZE // 2, config.IMAGE_SIZE // 2), interpolation=cv2.INTER_AREA)
+            img_aux = super.super_image(img_aux)
+            frame = resize_to_fit_window(img_aux, config.WINDOW_W, config.WINDOW_H)  
         else:
             if pc_cam_on:
                 ok, canvas, frame, result = cam.read()
@@ -480,16 +489,20 @@ async def main():
             main._vx += vel_smooth * (vx - main._vx)
             main._vy += vel_smooth * (vy - main._vy)
             vz = 0.15 * np.hypot(main._vx, main._vy)
-            sim.inject_mouse(pointer, [main._vx, main._vy, vz])
+            
+            sim.inject_mouse(pointer, 20.0 * np.array([main._vx, main._vy, vz]))
+
+            if sim_gradient_on and ray_shape != 5:
+                sim.inject_gradient(depth_factor=sim_depth_factor)
 
             sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
 
             if ray_shape == 0:
                 frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
             elif ray_shape == 1:
-                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 0.8 * sim.r, 0.8 * sim.r, 8.0 * sim.r)
+                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 2.0 * sim.r, 0.5 * sim.r, 4.5 * sim.r)
             elif ray_shape == 2:
-                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.8 * sim.r, 1.8 * sim.r, 0.6 * sim.r)
+                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 2.8 * sim.r, 2.8 * sim.r, 0.6 * sim.r)
             elif ray_shape == 3:
                 frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
             else:
@@ -500,7 +513,10 @@ async def main():
             last_frames.append(thumb)
             gif_last_frame = thumb
 
-        out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
+        if overlay_on:
+            out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
+        else:
+            out = frame
         cv2.imshow(config.APP_NAME, out)
 
         key = cv2.waitKeyEx(1)

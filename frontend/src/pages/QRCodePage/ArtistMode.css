@@ -1214,6 +1214,32 @@
 
 /* ── end Settings panel ──────────────────────────────────────── */
 
+.assistant-header--tappable {
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 0.18s ease,
+    transform 0.16s ease;
+}
+
+.assistant-header--tappable:hover {
+  background: linear-gradient(180deg, rgba(32, 32, 32, 0.96), rgba(18, 18, 18, 0.98));
+}
+
+.assistant-header--tappable:active {
+  transform: scale(0.99);
+}
+
+.assistant-stream-icon {
+  color: rgba(255, 255, 255, 0.36);
+  flex-shrink: 0;
+  transition: color 0.16s ease;
+}
+
+.assistant-header--tappable:hover .assistant-stream-icon {
+  color: rgba(255, 255, 255, 0.64);
+}
+
 @media (max-width: 540px) {
   .assistant-header {
     grid-template-columns: auto 1fr;

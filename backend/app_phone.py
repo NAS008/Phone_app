@@ -143,7 +143,6 @@ class AudioProcessor:
                     time.sleep(1.5)
         raise last_exc
 
-
 class MessageStore:
     def __init__(self, max_messages=200):
         self.messages = deque(maxlen=max_messages)

@@ -63,17 +63,39 @@ class Mouse:
         self.W = width
         self.H = height
         self.on = False
-        self.x = 0.5
-        self.y = 0.5
+        self.mouse_x = 0.5
+        self.mouse_y = 0.5
+        self.mouse_vx = 0.0
+        self.mouse_vy = 0.0
+        self.mouse_vz = 0.0
+        self.mouse_radius = 0.05
 
     def mouse_callback(self, event, x, y, flags, param):
+        wx = x / self.W
+        wy = 1.0 - (y / self.H)
         
         if event == cv2.EVENT_MOUSEMOVE:
-            self.x = 1.0 - x / self.W
-            self.y = y / self.H
+            mouse_prior_x = self.mouse_x
+            mouse_prior_y = self.mouse_y
+
+            self.mouse_x = wx
+            self.mouse_y = wy
+
+            self.mouse_vx = (self.mouse_x - mouse_prior_x)
+            self.mouse_vy = (self.mouse_y - mouse_prior_y)
+            self.mouse_vz = 0.5 * np.sqrt(self.mouse_vx * self.mouse_vx + self.mouse_vy * self.mouse_vy)
                 
         elif event == cv2.EVENT_LBUTTONDOWN:
             self.on = True
+
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.on = False
+
+        else:
+            # Decay velocity when not moving
+            self.mouse_vx *= 0.9
+            self.mouse_vy *= 0.9
+            self.mouse_vz *= 0.9
 
 class Camera:
     WRIST = 16

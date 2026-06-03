@@ -1,11 +1,58 @@
 import cv2
 import numpy as np
 import torch
+import os
+import glob
+import random
 import spandrel
 from PIL import Image
 from diffusers import StableDiffusion3Pipeline, AnimateDiffSparseControlNetPipeline, DPMSolverMultistepScheduler
 from diffusers.models import MotionAdapter, SparseControlNetModel
 
+class Folder:
+    def __init__(self, image_size, input_folder):
+        self.image_size = image_size
+        self.paths = self._init_image_list(input_folder)
+
+    def _init_image_list(self, folder, extensions=("*.png", "*.jpg", "*.jpeg")):
+        paths = []
+        for ext in extensions:
+            paths.extend(glob.glob(os.path.join(folder, ext)))
+        if not paths:
+            print("No images found in folder!")
+        paths.sort()
+        return paths
+
+    def _adjust_image(self, path, IW, IH):
+        img = cv2.imread(path)
+        h, w = img.shape[:2]
+
+        # Step 1: scale to fill IW x IH (cover, no black bars)
+        scale = max(IW / w, IH / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_LANCZOS4
+        resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
+
+        # Step 2: crop center to exactly IW x IH
+        x_off = (new_w - IW) // 2
+        y_off = (new_h - IH) // 2
+        cropped = resized[y_off:y_off + IH, x_off:x_off + IW]
+
+        # Step 3: paste into clean canvas (guarantees exact output size)
+        canvas = np.zeros((IH, IW, img.shape[2]), dtype=img.dtype)
+        canvas[0:IH, 0:IW] = cropped
+        return canvas
+     
+    def load_image(self, id=None):
+        if id is None:
+            image_path = random.choice(self.paths)
+        else:
+            image_path = self.paths[id]
+        image = self._adjust_image(image_path, self.image_size, self.image_size)
+        return image
+    
 class StableDiffusion:
     def __init__(self, SD_MODEL, IW, IH, INFERENCE_STEPS=12, GUIDANCE_SCALE=3.5, SEED=80367253):
 
@@ -124,7 +171,7 @@ class StableDiffusion:
         noise = torch.randn_like(latents_a, generator=generator)
 
         sigma_min = 0.60
-        sigma_max = 0.98
+        sigma_max = 0.90
 
         for i in range(1, self.INFERENCE_STEPS + 1):
             t = i / (self.INFERENCE_STEPS + 1)
@@ -240,10 +287,10 @@ class AnimateDiff:
         ).frames[0]
 
 class SuperResolution:
-    def __init__(self, config):
+    def __init__(self, folder):
         self.model = (
             spandrel.ModelLoader()
-            .load_from_file(f"{config.MODELS_FOLDER}/RealESRGAN_x4plus.pth")
+            .load_from_file(f"{folder}/RealESRGAN_x4plus.pth")
             .eval()
             .cuda()
         )

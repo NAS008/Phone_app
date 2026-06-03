@@ -168,16 +168,16 @@ def k_set_velocity_fluid(
 
     u_prev[idx] = -grad_y[id2] * strength * l * scale * 2.0
     v_prev[idx] = grad_x[id2] * strength * l * scale * 2.0
-    #w_prev[idx] = l * strength * (0.5 - scale) * 1.0
-    sign = float(1) if i % 10 < 5 else float(-1)
-    w_prev[idx] = sign * 2.0 * l * strength * float(k) / float(depth_max)
-    if i % 10 < 5:
-        v_prev[idx] -= (2.5 if j < G.y//2 else 0.5) * l * strength
-    else:
-        if j < G.y//2:
-            v_prev[idx] += 0.5 * l * strength
-        else:
-            u_prev[idx] -= 0.5 * l * strength
+    w_prev[idx] = l * strength * (0.5 - scale) * 1.0
+    # sign = float(1) if i % 10 < 5 else float(-1)
+    # w_prev[idx] = sign * 2.0 * l * strength * float(k) / float(depth_max)
+    # if i % 10 < 5:
+    #     v_prev[idx] -= (2.5 if j < G.y//2 else 0.5) * l * strength
+    # else:
+    #     if j < G.y//2:
+    #         v_prev[idx] += 0.5 * l * strength
+    #     else:
+    #         u_prev[idx] -= 0.5 * l * strength
 
     # u_prev[idx] = -grad_y[id2] * strength * l * 8.0
     # v_prev[idx] = grad_x[id2] * strength * l * 8.0
@@ -197,13 +197,19 @@ def k_update_rotation(
     d = p - p_prior    
     dist = wp.length(d)
     
+    # if dist < velocity_threshold:
+    #     n = wp.vec3(0.0, 0.0, 1.0) # Points to camera
+    # else:
+    #     n = d / dist # Normalize velocity direction
+
     if dist < velocity_threshold:
-        n = wp.vec3(0.0, 0.0, 1.0) # Points to camera
+        n = dir  # hold current orientation, lerp target == current == no change
     else:
-        n = d / dist # Normalize velocity direction
+        n = d / dist
+
     # Smoothly interpolate
-    dir += (n - dir) * lerp_factor
-    rot[tid] = dir
+    blended = dir + (n - dir) * lerp_factor
+    rot[tid] = wp.normalize(blended)
 
 @wp.kernel
 def k_constraint_force(
@@ -366,7 +372,7 @@ def k_new_image_sorted(
 @wp.kernel
 def k_new_image(
     pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
-    xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float),
+    xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float),
     h: float, G: wp.vec3i, depth_factor: float
 ):
     tid = wp.tid()
@@ -386,6 +392,7 @@ def k_new_image(
     lumc = lum(blurred, idc)
     z_max = depth_factor * h * float(G.z - 2)
     xyz_goal[tid] = wp.vec3(p.x, p.y, p.z + z_max * lumc)
+    rot[tid] = wp.vec3(0.0, 0.0, 1.0)
     invmass[tid] = 0.1 + 0.9 * lumc
 
 @wp.kernel
@@ -438,7 +445,7 @@ class Simulator:
     def __init__(self,
         IMAGE_SIZE=512, PIXELS_PER_CELL=4,
         G=[128, 128, 32], L=1, smooth=15,
-        gradient_strength=0.05, pressure_steps=10, jacobi=0.1, dt=0.2
+        gradient_strength=0.1, pressure_steps=10, jacobi=0.1, dt=0.1
     ):
         self.G = wp.vec3i(*G)
         self.h = 1.0 / max(self.G.x, self.G.y)    
@@ -466,9 +473,9 @@ class Simulator:
         for k in range(L):
             for j in range(PY_inner):
                 for i in range(PX_inner):
-                    jx = 0.05 * spacing * random.random()
-                    jy = 0.05 * spacing * random.random()
-                    jz = 0.05 * spacing * random.random()
+                    jx = 0.0 * spacing * random.random()
+                    jy = 0.0 * spacing * random.random()
+                    jz = 0.0 * spacing * random.random()
                     pos.append([x0 + i * spacing + jx, y0 + j * spacing + jy, z0 + k * spacing + jz])
                     if i < PX_inner - 1: n_x.append(particles + 1)
                     else: n_x.append(-1)
@@ -585,7 +592,7 @@ class Simulator:
 
         wp.launch(k_new_image, dim=self.particles, inputs=[
             self.pixels, self.blurred, self.IMAGE_SIZE,
-            self.xyz_base, self.xyz_goal, self.rgb, self.invmass,
+            self.xyz_base, self.xyz_goal, self.rgb, self.rot, self.invmass,
             self.h, self.G, depth_factor
         ], device="cuda")
 
@@ -660,7 +667,7 @@ class Simulator:
         wp.launch(k_update_rotation, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior,
             self.rot,
-            0.25 * self.r, 0.05
+            0.1 * self.r, 0.1
         ], device="cuda")
 
         self.u_prev.zero_()

@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebRTC Viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+    }
+    #remoteVideo {
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain;
+      background: #000;
+    }
+    #status {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      color: #0f0;
+      font: 14px monospace;
+      background: rgba(0,0,0,.5);
+      padding: 6px 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">connecting...</div>
+  <video id="remoteVideo" autoplay playsinline muted></video>
+
+  <script>
+    async function start() {
+      const status = document.getElementById("status");
+      const video = document.getElementById("remoteVideo");
+
+      const pc = new RTCPeerConnection();
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      pc.ontrack = (event) => {
+        video.srcObject = event.streams[0];
+        status.textContent = "stream connected";
+      };
+
+      pc.onconnectionstatechange = () => {
+        status.textContent = "pc: " + pc.connectionState;
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const response = await fetch("/offer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type
+        })
+      });
+
+      const answer = await response.json();
+      await pc.setRemoteDescription(answer);
+    }
+
+    start().catch(err => {
+      document.getElementById("status").textContent = "error: " + err.message;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

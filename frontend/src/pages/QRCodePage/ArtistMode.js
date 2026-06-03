@@ -317,27 +317,6 @@ const HeartIcon = (props) => (
   </svg>
 );
 
-const BroadcastIcon = (props) => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.7"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    {...props}
-  >
-    <circle cx="12" cy="12" r="2" />
-    <path d="M8.5 8.5a5 5 0 0 0 0 7" />
-    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-    <path d="M5 5a11 11 0 0 0 0 14" />
-    <path d="M19 5a11 11 0 0 1 0 14" />
-  </svg>
-);
-
 // Rotate device-frame acceleration into world frame using euler angles from DeviceOrientationEvent.
 // Produces metres/s² in world space (x=East, y=North, z=Up).
 const deviceToWorldAccel = (ax, ay, az, alpha, beta, gamma) => {
@@ -1292,7 +1271,6 @@ const appendFeed = useCallback((message) => {
             Guide the artwork with an idea, image or voice note
           </p>
         </div>
-        <BroadcastIcon className="assistant-stream-icon" />
       </header>
 
       {/* Keeping the current-canvas preview block in place for later iteration.

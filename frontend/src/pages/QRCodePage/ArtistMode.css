@@ -47,7 +47,7 @@
 
 .assistant-header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
@@ -1230,21 +1230,7 @@
   transform: scale(0.99);
 }
 
-.assistant-stream-icon {
-  color: rgba(255, 255, 255, 0.36);
-  flex-shrink: 0;
-  transition: color 0.16s ease;
-}
-
-.assistant-header--tappable:hover .assistant-stream-icon {
-  color: rgba(255, 255, 255, 0.64);
-}
-
 @media (max-width: 540px) {
-  .assistant-header {
-    grid-template-columns: auto 1fr;
-  }
-
   .assistant-refresh {
     grid-column: 1 / -1;
     justify-self: stretch;

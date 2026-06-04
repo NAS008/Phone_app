@@ -26,8 +26,6 @@
 
 import cv2
 import io
-import ssl
-import os
 import urllib.request
 import urllib.parse
 import numpy as np
@@ -47,77 +45,7 @@ from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera
-from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from stream import FrameBus, CvVideoTrack
 ctypes.windll.user32.SetProcessDPIAware()
-
-_pcs = set()
-
-async def _offer(request):
-    params = await request.json()
-    frame_bus = request.app["frame_bus"]
-    config = request.app["config"]
-
-    pc = RTCPeerConnection()
-    _pcs.add(pc)
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        if pc.connectionState in ("failed", "closed", "disconnected"):
-            await pc.close()
-            _pcs.discard(pc)
-
-    track = CvVideoTrack(frame_bus, fallback_size=(config.WINDOW_H, config.WINDOW_W))
-    pc.addTrack(track)
-
-    offer_desc = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    await pc.setRemoteDescription(offer_desc)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return web.json_response(
-        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type},
-        headers={"Access-Control-Allow-Origin": "*"},
-    )
-
-async def _offer_preflight(request):
-    return web.Response(headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    })
-
-async def _on_stream_shutdown(app):
-    coros = [pc.close() for pc in _pcs]
-    if coros:
-        await asyncio.gather(*coros)
-    _pcs.clear()
-
-async def _start_stream_server(frame_bus, config):
-    app = web.Application()
-    app["frame_bus"] = frame_bus
-    app["config"] = config
-    app.router.add_post("/offer", _offer)
-    app.router.add_route("OPTIONS", "/offer", _offer_preflight)
-    app.on_shutdown.append(_on_stream_shutdown)
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    _here = os.path.dirname(os.path.abspath(__file__))
-    cert_file = os.path.join(_here, "cert.pem")
-    key_file  = os.path.join(_here, "key.pem")
-    ssl_ctx = None
-    if os.path.exists(cert_file) and os.path.exists(key_file):
-        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ssl_ctx.load_cert_chain(cert_file, key_file)
-        print("✓ PC: SSL enabled (cert.pem / key.pem)")
-
-    site = web.TCPSite(runner, "0.0.0.0", 8080, ssl_context=ssl_ctx)
-    await site.start()
-    proto = "https" if ssl_ctx else "http"
-    print(f"✓ PC: WebRTC stream server listening on {proto}://0.0.0.0:8080")
-    return runner
 
 def get_first_part(parts, kind):
     for part in parts or []:
@@ -271,7 +199,6 @@ class OneEuro:
         
 async def main():
     config = Config()
-    frame_bus = FrameBus()
 
     # Optical flow setup
     of = OpticalFlow()
@@ -499,8 +426,6 @@ async def main():
     await bus.publish_session(session_id=session.session_id)
     qr_img = session.generate_qr_code()
 
-    stream_runner = await _start_stream_server(frame_bus, config)
-
     render_frame_dur = 1.0 / config.FPS
     release_frame_dur = 1.0 / config.FPS
     next_tick = time.perf_counter()
@@ -584,7 +509,6 @@ async def main():
             else:
                 frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
 
-        frame_bus.publish(frame)
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
             last_frames.append(thumb)
@@ -602,7 +526,6 @@ async def main():
 
     cv2.destroyAllWindows()
     await bus.close()
-    await stream_runner.cleanup()
 
 if __name__ == '__main__':
     asyncio.run(main())

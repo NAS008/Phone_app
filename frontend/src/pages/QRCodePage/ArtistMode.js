@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "./ArtistMode.css";
 import MessageBusService from "../../services/messageBusService";
 import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
-import StreamView from "./StreamView";
-
 const buildId = (prefix) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -317,27 +315,6 @@ const HeartIcon = (props) => (
   </svg>
 );
 
-const BroadcastIcon = (props) => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.7"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    {...props}
-  >
-    <circle cx="12" cy="12" r="2" />
-    <path d="M8.5 8.5a5 5 0 0 0 0 7" />
-    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-    <path d="M5 5a11 11 0 0 0 0 14" />
-    <path d="M19 5a11 11 0 0 1 0 14" />
-  </svg>
-);
-
 // Rotate device-frame acceleration into world frame using euler angles from DeviceOrientationEvent.
 // Produces metres/s² in world space (x=East, y=North, z=Up).
 const deviceToWorldAccel = (ax, ay, az, alpha, beta, gamma) => {
@@ -392,7 +369,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
   const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
-  const [isStreamOpen, setIsStreamOpen] = useState(false);
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const audioInputRef = useRef(null);
@@ -1254,14 +1230,6 @@ const appendFeed = useCallback((message) => {
     return "";
   }, [audioWidgetDisplayText, audioWidgetPhase, audioWidgetText, recordingSeconds]);
 
-  if (isStreamOpen) {
-    return (
-      <div className="artist-mode">
-        <StreamView onClose={() => setIsStreamOpen(false)} />
-      </div>
-    );
-  }
-
   return (
     <div className="artist-mode">
       {notice && (
@@ -1270,14 +1238,7 @@ const appendFeed = useCallback((message) => {
         </div>
       )}
 
-      <header
-        className="assistant-header assistant-header--tappable"
-        onClick={() => setIsStreamOpen(true)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setIsStreamOpen(true)}
-        aria-label="Open live stream"
-      >
+      <header className="assistant-header">
         <div className="assistant-brand-mark" aria-hidden="true">
           <img
             src={officialLogo}
@@ -1291,7 +1252,6 @@ const appendFeed = useCallback((message) => {
             Guide the artwork with an idea, image or voice note
           </p>
         </div>
-        <BroadcastIcon className="assistant-stream-icon" />
       </header>
 
       {/* Keeping the current-canvas preview block in place for later iteration.

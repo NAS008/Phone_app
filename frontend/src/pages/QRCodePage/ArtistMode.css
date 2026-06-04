@@ -1212,39 +1212,7 @@
   color: #c8c8c8;
 }
 
-.settings-stream {
-  margin-top: 8px;
-  height: 260px;
-  position: relative;
-  border-radius: 16px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.settings-stream .stream-view {
-  flex: none;
-  width: 100%;
-  height: 100%;
-  border-radius: 16px;
-}
-
 /* ── end Settings panel ──────────────────────────────────────── */
-
-.assistant-header--tappable {
-  cursor: pointer;
-  user-select: none;
-  transition:
-    background 0.18s ease,
-    transform 0.16s ease;
-}
-
-.assistant-header--tappable:hover {
-  background: linear-gradient(180deg, rgba(32, 32, 32, 0.96), rgba(18, 18, 18, 0.98));
-}
-
-.assistant-header--tappable:active {
-  transform: scale(0.99);
-}
 
 @media (max-width: 540px) {
   .assistant-refresh {

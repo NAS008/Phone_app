@@ -71,14 +71,16 @@ const StreamView = ({ onClose }) => {
 
   return (
     <div className="stream-view">
-      <button
-        type="button"
-        className="stream-close-btn"
-        onClick={onClose}
-        aria-label="Close stream"
-      >
-        <CloseIcon />
-      </button>
+      {onClose && (
+        <button
+          type="button"
+          className="stream-close-btn"
+          onClick={onClose}
+          aria-label="Close stream"
+        >
+          <CloseIcon />
+        </button>
+      )}
       {status !== "live" && (
         <div className="stream-status">{status}</div>
       )}

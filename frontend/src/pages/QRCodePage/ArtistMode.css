@@ -1212,6 +1212,22 @@
   color: #c8c8c8;
 }
 
+.settings-stream {
+  margin-top: 8px;
+  height: 260px;
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.settings-stream .stream-view {
+  flex: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+}
+
 /* ── end Settings panel ──────────────────────────────────────── */
 
 .assistant-header--tappable {

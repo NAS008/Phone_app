@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./ArtistMode.css";
 import MessageBusService from "../../services/messageBusService";
-import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
 import StreamView from "./StreamView";
 
 const buildId = (prefix) =>
@@ -371,8 +370,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsGradientOn, setSettingsGradientOn] = useState(false);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
   const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
-  const [isStreamOpen, setIsStreamOpen] = useState(false);
-
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const audioInputRef = useRef(null);
@@ -1234,14 +1231,6 @@ const appendFeed = useCallback((message) => {
     return "";
   }, [audioWidgetDisplayText, audioWidgetPhase, audioWidgetText, recordingSeconds]);
 
-  if (isStreamOpen) {
-    return (
-      <div className="artist-mode">
-        <StreamView onClose={() => setIsStreamOpen(false)} />
-      </div>
-    );
-  }
-
   return (
     <div className="artist-mode">
       {notice && (
@@ -1249,29 +1238,6 @@ const appendFeed = useCallback((message) => {
           {notice.text}
         </div>
       )}
-
-      <header
-        className="assistant-header assistant-header--tappable"
-        onClick={() => setIsStreamOpen(true)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setIsStreamOpen(true)}
-        aria-label="Open live stream"
-      >
-        <div className="assistant-brand-mark" aria-hidden="true">
-          <img
-            src={officialLogo}
-            alt="The First NonCarbon Artist"
-            className="assistant-brand-image"
-          />
-        </div>
-        <div className="assistant-copy">
-          <h1>{nickname ? `Hello ${nickname}` : "Hello"}</h1>
-          <p>
-            Guide the artwork with an idea, image or voice note
-          </p>
-        </div>
-      </header>
 
       {/* Keeping the current-canvas preview block in place for later iteration.
       <section className="preview-card">
@@ -1607,6 +1573,10 @@ const appendFeed = useCallback((message) => {
                 onMouseUp={(e) => sendSetting("depth_factor", parseFloat(e.target.value))}
                 onTouchEnd={() => sendSetting("depth_factor", settingsDepthFactor)}
               />
+            </div>
+
+            <div className="settings-stream">
+              <StreamView />
             </div>
 
           </div>

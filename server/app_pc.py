@@ -290,8 +290,9 @@ async def main():
     sim = Simulator(
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
-        G=config.G, L=3,
+        G=config.G, L=config.LAYERS,
         smooth=15,
+        dt = 1.0 / config.FPS,
     )
     sim_constraints_on = True
     sim_go_back_on = True

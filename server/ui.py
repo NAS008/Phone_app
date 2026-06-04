@@ -59,7 +59,7 @@ class Audio:
         return audio
    
 class Mouse:
-    def __init__(self, width, height):
+    def __init__(self, width, height, dt):
         self.W = width
         self.H = height
         self.on = False
@@ -69,6 +69,7 @@ class Mouse:
         self.mouse_vy = 0.0
         self.mouse_vz = 0.0
         self.mouse_radius = 0.05
+        self.dt = dt
 
     def mouse_callback(self, event, x, y, flags, param):
         wx = x / self.W
@@ -81,8 +82,8 @@ class Mouse:
             self.mouse_x = wx
             self.mouse_y = wy
 
-            self.mouse_vx = (self.mouse_x - mouse_prior_x)
-            self.mouse_vy = (self.mouse_y - mouse_prior_y)
+            self.mouse_vx = (self.mouse_x - mouse_prior_x) / self.dt
+            self.mouse_vy = (self.mouse_y - mouse_prior_y) / self.dt
             self.mouse_vz = 0.5 * np.sqrt(self.mouse_vx * self.mouse_vx + self.mouse_vy * self.mouse_vy)
                 
         elif event == cv2.EVENT_LBUTTONDOWN:

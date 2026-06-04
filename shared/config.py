@@ -11,8 +11,8 @@ class Config:
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 1080, 1080#2160, 2160
-    IMAGE_SIZE = 512
+    WINDOW_W, WINDOW_H = 2048, 2048#512, 512#1080, 1080#2160, 2160
+    IMAGE_SIZE = 1024
     GRID_SIZE = 128
     PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
@@ -22,13 +22,14 @@ class Config:
     else:
         GX = int(GRID_SIZE * aspect)
         GY = GRID_SIZE
-    GZ = GRID_SIZE // 4
+    GZ = GRID_SIZE // 8
     G = [GX, GY, GZ]
+    LAYERS = 2
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
-    light = [0.5 * GX / max(GX, GY), 1.0 * GY / max(GX, GY), 0.3]    
+    light = [0.4 * GX / max(GX, GY), 0.9 * GY / max(GX, GY), 0.5]    
     fov = 1.2
-    samples = 4
+    samples = 1
     background = [0.0, 0.0, 0.0]
     ambient = 0.7
     shadow = 0.3

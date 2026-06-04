@@ -473,14 +473,12 @@ class Simulator:
         for k in range(L):
             for j in range(PY_inner):
                 for i in range(PX_inner):
-                    jx = 0.0 * spacing * random.random()
-                    jy = 0.0 * spacing * random.random()
-                    jz = 0.0 * spacing * random.random()
-                    pos.append([x0 + i * spacing + jx, y0 + j * spacing + jy, z0 + k * spacing + jz])
+                    pos.append([x0 + i * spacing, y0 + j * spacing, z0 + k * 2.0 * self.h])
                     if i < PX_inner - 1: n_x.append(particles + 1)
                     else: n_x.append(-1)
                     if j < PY_inner - 1: n_y.append(particles + PX_inner)
                     else: n_y.append(-1)
+
                     particles += 1
         self.particles = len(pos)
         # Particle arrays
@@ -538,6 +536,11 @@ class Simulator:
         if max_mag > 0:
             grad_x /= max_mag
             grad_y /= max_mag
+
+        # Flip vertically so row 0 = bottom of image (matches GPU grid Y-up convention)
+        grad_x   = np.flipud(grad_x)
+        grad_y   = np.flipud(grad_y)   # also flip gy to stay consistent
+        luminance = np.flipud(luminance)
 
         gx  = wp.array(grad_x.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
         gy  = wp.array(grad_y.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
@@ -615,7 +618,8 @@ class Simulator:
     def _apply_constraints(self):
         self.xyz_corr.zero_()
         for bond, l0 in [
-            (self.next_y, 2.0 * self.r)
+            (self.next_y, 2.0 * self.r),
+            (self.next_x, 2.0 * self.r)
         ]:
             wp.launch(k_constraint_force, dim=self.particles, inputs=[
                 self.xyz, self.xyz_corr,
@@ -659,7 +663,7 @@ class Simulator:
 
         if go_back_on:
             wp.launch(k_goal_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_goal, 0.05
+                self.xyz, self.xyz_goal, 0.01
             ], device="cuda")
 
         self._apply_constraints()

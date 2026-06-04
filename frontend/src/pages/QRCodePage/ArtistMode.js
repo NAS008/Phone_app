@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./ArtistMode.css";
 import MessageBusService from "../../services/messageBusService";
+import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
 import StreamView from "./StreamView";
 
 const buildId = (prefix) =>
@@ -1238,6 +1239,22 @@ const appendFeed = useCallback((message) => {
           {notice.text}
         </div>
       )}
+
+      <header className="assistant-header">
+        <div className="assistant-brand-mark" aria-hidden="true">
+          <img
+            src={officialLogo}
+            alt="The First NonCarbon Artist"
+            className="assistant-brand-image"
+          />
+        </div>
+        <div className="assistant-copy">
+          <h1>{nickname ? `Hello ${nickname}` : "Hello"}</h1>
+          <p>
+            Guide the artwork with an idea, image or voice note
+          </p>
+        </div>
+      </header>
 
       {/* Keeping the current-canvas preview block in place for later iteration.
       <section className="preview-card">

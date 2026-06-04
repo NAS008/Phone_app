@@ -27,6 +27,7 @@ const StreamView = ({ onClose }) => {
   const [status, setStatus] = useState("connecting...");
 
   useEffect(() => {
+    let cancelled = false;
     const pc = new RTCPeerConnection();
 
     pc.addTransceiver("video", { direction: "recvonly" });
@@ -35,10 +36,11 @@ const StreamView = ({ onClose }) => {
       if (videoRef.current) {
         videoRef.current.srcObject = event.streams[0];
       }
-      setStatus("live");
+      if (!cancelled) setStatus("live");
     };
 
     pc.onconnectionstatechange = () => {
+      if (cancelled) return;
       const s = pc.connectionState;
       if (s === "connected") setStatus("live");
       else if (s === "failed" || s === "closed" || s === "disconnected") setStatus("unavailable");
@@ -48,6 +50,20 @@ const StreamView = ({ onClose }) => {
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // Wait for ICE gathering to complete so the SDP contains all candidates
+        await new Promise((resolve) => {
+          if (pc.iceGatheringState === "complete") {
+            resolve();
+          } else {
+            pc.onicegatheringstatechange = () => {
+              if (pc.iceGatheringState === "complete") resolve();
+            };
+          }
+        });
+
+        if (cancelled) return;
+
         const res = await fetch(OFFER_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -58,13 +74,15 @@ const StreamView = ({ onClose }) => {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const answer = await res.json();
+        if (cancelled) return;
         await pc.setRemoteDescription(answer);
       } catch {
-        setStatus("unavailable");
+        if (!cancelled) setStatus("unavailable");
       }
     })();
 
     return () => {
+      cancelled = true;
       pc.close();
     };
   }, []);

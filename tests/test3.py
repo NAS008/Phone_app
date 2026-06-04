@@ -1,21 +1,19 @@
-# Simply text sim and ray code
+# Ray at low res 512 x 512 and then super res
 
 import cv2
 import numpy as np
-import time
 import asyncio
 import ctypes
-ctypes.windll.user32.SetProcessDPIAware()
-
+import time
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
-
 from config import Config
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from sd35 import Folder
+from sd35 import Folder, SuperResolution
+ctypes.windll.user32.SetProcessDPIAware()
 
 def resize_to_fit_window(img, window_w, window_h):
     target_w = window_w
@@ -45,21 +43,18 @@ async def main():
     sim = Simulator(
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
-        G=config.G, L=config.LAYERS,
+        G=config.G, L=4,
         smooth=15,
-        dt = 1.0 / config.FPS,
     )
     folder = Folder(config.IMAGE_SIZE, config.INPUT_FOLDER)
     img = folder.load_image()
-    sim.new_image(img, depth_factor=0.0)
-    sim_gradient_on = False
-    sim_goback_on = False
-    sim_constraints_on = False
+    sim.new_image(img)
 
     # Ray tracer setup
+    factor = 1
     ray = RayTracer(
-        W=config.WINDOW_W,
-        H=config.WINDOW_H,
+        W=config.WINDOW_W // factor,
+        H=config.WINDOW_H // factor,
         G=config.G,
         camera=config.camera,
         target=config.target,
@@ -72,7 +67,9 @@ async def main():
     )
     ray_shape = 0
 
-    ms = Mouse(config.WINDOW_W, config.WINDOW_H, 1.0 / config.FPS)
+    super = SuperResolution(config.MODELS_FOLDER)
+
+    ms = Mouse(config.WINDOW_W, config.WINDOW_H)
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -84,62 +81,55 @@ async def main():
     next_tick = time.perf_counter()
     while True:
 
-        # Simulate
-        if sim_gradient_on:
-            sim.inject_gradient()
+        sim.inject_gradient()
 
         if ms.on:
             sim.inject_mouse(
                 np.array([ms.mouse_x, ms.mouse_y, 0.0]),
-                np.array([ms.mouse_vx, ms.mouse_vy, ms.mouse_vz])
+                20.0 * np.array([ms.mouse_vx, ms.mouse_vy, ms.mouse_vz])
             )
-        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_goback_on)
+        sim.update(constraints_on=True, go_back_on=True)
 
-        # Keep FPS cadence on raytracing to save CPU, since it's the bottleneck
         now = time.perf_counter()
         if now < next_tick:
             await asyncio.sleep(next_tick - now)
             continue
+
         next_tick += frame_dur
         if now > next_tick + frame_dur:
             next_tick = now + frame_dur
 
-        # Raytrace
         if ray_shape == 0:
             frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
         elif ray_shape == 1:
-            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
+            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 0.25 * sim.r, 2.75 * sim.r)
         elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 0.3 * sim.r)
         elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.3 * sim.r)
         elif ray_shape == 4:
-            frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
+            frame = ray.sphere(sim.xyz, sim.rgb, 1.0 * sim.r)
         else:
-            frame = resize_to_fit_window(img, config.WINDOW_W, config.WINDOW_H)  
+            frame = resize_to_fit_window(img, config.WINDOW_W // factor, config.WINDOW_H // factor)  
 
-        cv2.imshow(config.APP_NAME, frame)
+        #out = super.super_image(frame)
+        out = resize_to_fit_window(frame, config.WINDOW_W, config.WINDOW_H)
+        cv2.imshow(config.APP_NAME, out)
 
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):
             break
-        elif key == ord('b'):
-            sim_goback_on = not sim_goback_on
-        elif key == ord('c'):
-            sim_constraints_on = not sim_constraints_on
-        elif key == ord('g'):
-            sim_gradient_on = not sim_gradient_on
         elif key == ord('n'):
             img = folder.load_image()
-            sim.new_image(img, depth_factor=0.0)
+            sim.new_image(img)
         elif key == ord('r'):
             ray_shape += 1
             if ray_shape >= 6:
                 ray_shape = 0
         elif key == ord('z'):
             ray.fov -= 0.1
-            if ray.fov < 0.05:
-                ray.fov = 1.1
+            if ray.fov < 0.1:
+                ray.fov = 2.0
 
     cv2.destroyAllWindows()
 

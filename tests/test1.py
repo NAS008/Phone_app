@@ -72,7 +72,7 @@ async def main():
     )
     ray_shape = 0
 
-    ms = Mouse(config.WINDOW_W, config.WINDOW_H, 1.0 / config.FPS)
+    ms = Mouse(1.0 / config.FPS, config.WINDOW_W, config.WINDOW_H)
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -89,10 +89,7 @@ async def main():
             sim.inject_gradient()
 
         if ms.on:
-            sim.inject_mouse(
-                np.array([ms.mouse_x, ms.mouse_y, 0.0]),
-                np.array([ms.mouse_vx, ms.mouse_vy, ms.mouse_vz])
-            )
+            sim.inject_mouse(ms.pos, ms.vel)
         sim.update(constraints_on=sim_constraints_on, go_back_on=sim_goback_on)
 
         # Keep FPS cadence on raytracing to save CPU, since it's the bottleneck

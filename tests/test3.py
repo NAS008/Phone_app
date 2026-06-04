@@ -69,7 +69,7 @@ async def main():
 
     super = SuperResolution(config.MODELS_FOLDER)
 
-    ms = Mouse(config.WINDOW_W, config.WINDOW_H)
+    ms = Mouse(1.0 / config.FPS, config.WINDOW_W, config.WINDOW_H)
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -84,10 +84,7 @@ async def main():
         sim.inject_gradient()
 
         if ms.on:
-            sim.inject_mouse(
-                np.array([ms.mouse_x, ms.mouse_y, 0.0]),
-                20.0 * np.array([ms.mouse_vx, ms.mouse_vy, ms.mouse_vz])
-            )
+            sim.inject_mouse(ms.pos, ms.vel)
         sim.update(constraints_on=True, go_back_on=True)
 
         now = time.perf_counter()

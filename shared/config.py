@@ -22,7 +22,7 @@ class Config:
     else:
         GX = int(GRID_SIZE * aspect)
         GY = GRID_SIZE
-    GZ = GRID_SIZE // 8
+    GZ = GRID_SIZE // 4
     G = [GX, GY, GZ]
     LAYERS = 2
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
@@ -37,7 +37,9 @@ class Config:
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
-    POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
+    UI_POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
+    UI_CHANNELS = ["mouse", "cam", "mic"]
+    UI_CHANNEL = UI_CHANNELS[2]
     
     # Context
     CONTEXT_SIZE = 20  # max conversation turns kept per session

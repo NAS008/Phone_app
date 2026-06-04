@@ -2,7 +2,6 @@ import asyncio
 import random
 import uuid
 import cv2
-import numpy as np
 from google.genai import types as gtypes
 
 
@@ -154,11 +153,8 @@ class Director:
         await asyncio.sleep(self.config.DIRECTOR_SCENE_INTERVAL)
         while self._enabled:
             try:
-                roll = random.random()
-                if roll < 0.33:
+                if random.random() < 0.5:
                     await self._change_shape()
-                elif roll < 0.66:
-                    await self._sweep_pointer()
                 else:
                     await self._change_style()
             except asyncio.CancelledError:
@@ -178,49 +174,3 @@ class Director:
         print(f"✓ Director: changing style → {styles[idx]}")
         await self.bus.publish_settings(style_index=idx)
 
-    async def _sweep_pointer(self):
-        """Catmull-Rom spline through random points, published as USER_GESTURE."""
-        session_id, _, _, _, _ = self._get_state()
-        if not session_id:
-            return
-
-        n        = self.config.DIRECTOR_SPLINE_POINTS
-        substeps = self.config.DIRECTOR_SPLINE_SUBSTEPS
-        ctrl     = [(random.random(), random.random()) for _ in range(n)]
-
-        path = []
-        for i in range(len(ctrl) - 1):
-            p0 = ctrl[max(0, i - 1)]
-            p1 = ctrl[i]
-            p2 = ctrl[i + 1]
-            p3 = ctrl[min(len(ctrl) - 1, i + 2)]
-            for j in range(substeps):
-                t  = j / substeps
-                t2 = t * t
-                t3 = t2 * t
-                x = 0.5 * (
-                    2 * p1[0]
-                    + (-p0[0] + p2[0]) * t
-                    + (2*p0[0] - 5*p1[0] + 4*p2[0] - p3[0]) * t2
-                    + (-p0[0] + 3*p1[0] - 3*p2[0] + p3[0]) * t3
-                )
-                y = 0.5 * (
-                    2 * p1[1]
-                    + (-p0[1] + p2[1]) * t
-                    + (2*p0[1] - 5*p1[1] + 4*p2[1] - p3[1]) * t2
-                    + (-p0[1] + 3*p1[1] - 3*p2[1] + p3[1]) * t3
-                )
-                path.append((float(np.clip(x, 0.0, 1.0)),
-                             float(np.clip(y, 0.0, 1.0))))
-
-        frame_dt = 1.0 / self.config.FPS
-        print(f"✓ Director: sweeping pointer — {len(path)} points")
-        for x, y in path:
-            if not self._enabled:
-                break
-            await self.bus.publish_user_gesture(
-                session_id=session_id,
-                nickname=self.NICKNAME,
-                x=x, y=y, z=0.0,
-            )
-            await asyncio.sleep(frame_dt)

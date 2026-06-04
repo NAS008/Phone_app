@@ -134,7 +134,6 @@ const pickAcknowledgment = () =>
 const INTRO_TYPING_INTERVAL = 42;
 const INTRO_TYPING_TARGET = 70;
 const INTRO_MESSAGE_GAP = 620;
-const GYRO_SEND_INTERVAL = 100;
 const TRANSCRIPT_TYPING_TARGET = 60;
 const TRANSCRIPT_TYPING_INTERVAL = 22;
 
@@ -248,26 +247,6 @@ const GalleryIcon = (props) => (
   </svg>
 );
 
-const GyroIcon = (props) => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.6"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    {...props}
-  >
-    <circle cx="12" cy="12" r="2.2" />
-    <ellipse cx="12" cy="12" rx="8" ry="4.8" />
-    <path d="M12 4C16.4 4 20 7.58 20 12C20 16.42 16.4 20 12 20" />
-    <path d="M12 4C7.6 4 4 7.58 4 12C4 16.42 7.6 20 12 20" />
-  </svg>
-);
-
 const SettingsIcon = (props) => (
   <svg
     width="20"
@@ -315,33 +294,6 @@ const HeartIcon = (props) => (
   </svg>
 );
 
-// Rotate device-frame acceleration into world frame using euler angles from DeviceOrientationEvent.
-// Produces metres/s² in world space (x=East, y=North, z=Up).
-const deviceToWorldAccel = (ax, ay, az, alpha, beta, gamma) => {
-  const a = (alpha ?? 0) * (Math.PI / 180);
-  const b = (beta  ?? 0) * (Math.PI / 180);
-  const g = (gamma ?? 0) * (Math.PI / 180);
-  const cA = Math.cos(a), sA = Math.sin(a);
-  const cB = Math.cos(b), sB = Math.sin(b);
-  const cG = Math.cos(g), sG = Math.sin(g);
-  return {
-    x: (cA * cG - sA * sB * sG) * ax + (-sA * cB) * ay + (cA * sG + sA * sB * cG) * az,
-    y: (sA * cG + cA * sB * sG) * ax + (cA * cB) * ay + (sA * sG - cA * sB * cG) * az,
-    z: (-cB * sG) * ax + sB * ay + (cB * cG) * az,
-  };
-};
-
-// Mean absolute per-channel difference between two ImageData objects (0–255 scale, alpha ignored).
-// Returns the average |Δchannel| across all RGB channels and all pixels.
-const frameDiff = (a, b) => {
-  const d1 = a.data, d2 = b.data;
-  let sum = 0;
-  for (let i = 0; i < d1.length; i += 4) {
-    sum += Math.abs(d1[i] - d2[i]) + Math.abs(d1[i + 1] - d2[i + 1]) + Math.abs(d1[i + 2] - d2[i + 2]);
-  }
-  return sum / (d1.length / 4 * 3); // divide by total RGB channel count → true per-channel mean
-};
-
 const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [prompt, setPrompt] = useState("");
   const [draftImage, setDraftImage] = useState(null);
@@ -355,7 +307,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [audioWidgetPhase, setAudioWidgetPhase] = useState("idle");
   const [audioWidgetText, setAudioWidgetText] = useState("");
   const [audioWidgetDisplayText, setAudioWidgetDisplayText] = useState("");
-  const [isGyroEnabled, setIsGyroEnabled] = useState(false);
   const [isLikePulsing, setIsLikePulsing] = useState(false);
   const [isVideoRequesting, setIsVideoRequesting] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
@@ -384,21 +335,6 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const composerTextareaRef = useRef(null);
   const feedEndRef = useRef(null);
   const introSequenceEndsRef = useRef(0);
-  const gyroDataRef = useRef({
-    alpha: null,
-    beta: null,
-    gamma: null,
-    absolute: null,
-  });
-  const lastSentGyroRef = useRef(null);
-  const gyroTransportBlockedRef = useRef(false);
-  const positionCameraStreamRef = useRef(null);
-  const videoRef = useRef(null);
-  const motionDataRef = useRef({ x: 0, y: 0, z: 0 });
-  const positionRef = useRef({ x: 0, y: 0, z: 0 });
-  const velocityRef = useRef({ x: 0, y: 0, z: 0 });
-  const prevFrameDataRef = useRef(null);
-  const posLastTimeRef = useRef(0);
   const likeTimeoutRef = useRef(null);
   const messageReceivedPollRef = useRef(null);
   const lastMessageReceivedMsRef = useRef(0);
@@ -855,73 +791,6 @@ const appendFeed = useCallback((message) => {
     [uploadAudio]
   );
 
-  const stopPositionCamera = useCallback(() => {
-    if (positionCameraStreamRef.current) {
-      positionCameraStreamRef.current.getTracks().forEach((t) => t.stop());
-      positionCameraStreamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    positionRef.current = { x: 0, y: 0, z: 0 };
-    velocityRef.current = { x: 0, y: 0, z: 0 };
-    prevFrameDataRef.current = null;
-    posLastTimeRef.current = 0;
-  }, []);
-
-  const handleGyroToggle = useCallback(async () => {
-    if (isGyroEnabled) {
-      setIsGyroEnabled(false);
-      stopPositionCamera();
-      flashNotice("success", "Position tracking turned off.");
-      return;
-    }
-
-    // Request orientation permission (iOS 13+)
-    try {
-      const OrientationCtor = typeof window !== "undefined" ? window.DeviceOrientationEvent : undefined;
-      if (OrientationCtor && typeof OrientationCtor.requestPermission === "function") {
-        if ((await OrientationCtor.requestPermission()) !== "granted") {
-          flashNotice("error", "Orientation access was not granted.");
-          return;
-        }
-      }
-    } catch {
-      flashNotice("error", "Orientation access was blocked.");
-      return;
-    }
-
-    // Request motion permission (iOS 13+, separate from orientation)
-    try {
-      const MotionCtor = typeof window !== "undefined" ? window.DeviceMotionEvent : undefined;
-      if (MotionCtor && typeof MotionCtor.requestPermission === "function") {
-        if ((await MotionCtor.requestPermission()) !== "granted") {
-          flashNotice("error", "Motion access was not granted.");
-          return;
-        }
-      }
-    } catch {
-      flashNotice("error", "Motion access was blocked.");
-      return;
-    }
-
-    // Start rear camera for zero-velocity detection (ZUPT)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 64 }, height: { ideal: 48 } },
-      });
-      positionCameraStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch {
-      // Camera unavailable — position tracking degrades to pure IMU
-    }
-
-    setIsGyroEnabled(true);
-    flashNotice("success", "Position tracking turned on.");
-  }, [flashNotice, isGyroEnabled, stopPositionCamera]);
-
   const handleImageSelection = useCallback(
     async (file, sourceLabel) => {
       if (!file) return;
@@ -1031,152 +900,10 @@ const appendFeed = useCallback((message) => {
 
 
   useEffect(() => {
-    if (!isGyroEnabled) return undefined;
-
-    const handleOrientation = (event) => {
-      gyroDataRef.current = {
-        alpha: event.alpha ?? null,
-        beta: event.beta ?? null,
-        gamma: event.gamma ?? null,
-        absolute: event.absolute ?? null,
-      };
-    };
-
-    window.addEventListener("deviceorientation", handleOrientation);
-    return () => {
-      window.removeEventListener("deviceorientation", handleOrientation);
-    };
-  }, [isGyroEnabled]);
-
-  // DeviceMotionEvent listener — stores gravity-removed acceleration in device frame.
-  useEffect(() => {
-    if (!isGyroEnabled) return undefined;
-
-    const handleMotion = (event) => {
-      const a = event.acceleration;
-      motionDataRef.current = { x: a?.x ?? 0, y: a?.y ?? 0, z: a?.z ?? 0 };
-    };
-
-    window.addEventListener("devicemotion", handleMotion);
-    return () => window.removeEventListener("devicemotion", handleMotion);
-  }, [isGyroEnabled]);
-
-  // Position integration loop + ZUPT from camera + transmission.
-  useEffect(() => {
-    if (!isGyroEnabled || !sessionId) {
-      gyroTransportBlockedRef.current = false;
-      lastSentGyroRef.current = null;
-      positionRef.current = { x: 0.5, y: 0.5, z: 0 };
-      velocityRef.current = { x: 0, y: 0, z: 0 };
-      prevFrameDataRef.current = null;
-      posLastTimeRef.current = 0;
-      return undefined;
-    }
-
-    let cancelled = false;
-    const STATIONARY_DIFF = 6;      // mean per-channel diff threshold (0–255 scale) for ZUPT
-    const FRAME_W = 64, FRAME_H = 48;
-    // Tilt range (degrees) that maps to full-speed movement; smaller = more sensitive.
-    const TILT_RANGE = 30;
-    // Max pointer speed in normalized units per second at full tilt.
-    const MAX_SPEED = 0.8;
-
-    positionRef.current = { x: 0.5, y: 0.5, z: 0 };
-    velocityRef.current = { x: 0, y: 0, z: 0 };
-
-    const offscreen = document.createElement("canvas");
-    offscreen.width = FRAME_W;
-    offscreen.height = FRAME_H;
-    const ctx = offscreen.getContext("2d");
-
-    posLastTimeRef.current = performance.now();
-
-    // 10 Hz — camera ZUPT + velocity integration
-    const frameIntervalId = setInterval(() => {
-      if (cancelled || !ctx) return;
-
-      const video = videoRef.current;
-      const now = performance.now();
-      const dt = Math.min((now - posLastTimeRef.current) / 1000, 0.1);
-      posLastTimeRef.current = now;
-
-      // Camera ZUPT: compare consecutive frames; if stationary, kill velocity.
-      let isStationary = false;
-      if (video && video.readyState >= 2) {
-        ctx.drawImage(video, 0, 0, FRAME_W, FRAME_H);
-        const frame = ctx.getImageData(0, 0, FRAME_W, FRAME_H);
-        const prev = prevFrameDataRef.current;
-        prevFrameDataRef.current = frame;
-        if (prev && frameDiff(prev, frame) < STATIONARY_DIFF) {
-          isStationary = true;
-        }
-      }
-
-      const { alpha, beta, gamma } = gyroDataRef.current;
-
-      if (isStationary) {
-        velocityRef.current = { x: 0, y: 0, z: 0 };
-        positionRef.current = { ...positionRef.current, z: 0 };
-        return;
-      }
-
-      // Tilt angle (clamped to ±TILT_RANGE) drives velocity, not position.
-      // gamma: tilt right → positive vx (neutral = 0°).
-      // beta: neutral upright portrait = 90°, so offset by 90 before scaling.
-      const vx = Math.max(-1, Math.min(1, (gamma ?? 0) / TILT_RANGE)) * MAX_SPEED;
-      const vy = Math.max(-1, Math.min(1, ((beta ?? 90) - 90) / TILT_RANGE)) * MAX_SPEED;
-
-      const pos = positionRef.current;
-      positionRef.current = {
-        x: Math.max(0, Math.min(1, pos.x + vx * dt)),
-        y: Math.max(0, Math.min(1, pos.y + vy * dt)),
-        z: positionRef.current.z,
-      };
-
-      // z = world-frame acceleration magnitude → drives vz force in sim
-      const { x: ax, y: ay, z: az } = motionDataRef.current;
-      const w = deviceToWorldAccel(ax, ay, az, alpha, beta, gamma);
-      positionRef.current.z = Math.sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
-    }, 100);
-
-    // 320 ms — transmit position to the bus
-    const txIntervalId = setInterval(async () => {
-      if (cancelled || gyroTransportBlockedRef.current || isSubmitting) return;
-
-      const { x, y, z } = positionRef.current;
-      const prev = lastSentGyroRef.current;
-      const changed =
-        !prev ||
-        Math.abs(x - (prev.x ?? 0)) > 0.001 ||
-        Math.abs(y - (prev.y ?? 0)) > 0.001 ||
-        Math.abs(z - (prev.z ?? 0)) > 0.001;
-
-      if (!changed) return;
-
-      try {
-        await MessageBusService.sendUserGesture({ x, y, z, sessionId, nickname });
-        lastSentGyroRef.current = { x, y, z };
-      } catch {
-        gyroTransportBlockedRef.current = true;
-        flashNotice("error", "Position tracking failed.");
-      }
-    }, GYRO_SEND_INTERVAL);
-
-    return () => {
-      cancelled = true;
-      clearInterval(frameIntervalId);
-      clearInterval(txIntervalId);
-      gyroTransportBlockedRef.current = false;
-      lastSentGyroRef.current = null;
-    };
-  }, [flashNotice, isGyroEnabled, isSubmitting, nickname, sessionId]);
-
-  useEffect(() => {
     const refreshTimeouts = refreshTimeoutsRef.current;
 
     return () => {
       stopMediaStream();
-      stopPositionCamera();
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current);
       if (likeTimeoutRef.current) clearTimeout(likeTimeoutRef.current);
       if (messageReceivedPollRef.current) clearTimeout(messageReceivedPollRef.current);
@@ -1184,7 +911,7 @@ const appendFeed = useCallback((message) => {
       clearAudioWidgetTimers();
       clearIntroTimers();
     };
-  }, [clearAudioWidgetTimers, clearIntroTimers, stopMediaStream, stopPositionCamera]);
+  }, [clearAudioWidgetTimers, clearIntroTimers, stopMediaStream]);
 
   useEffect(() => {
     if (!isAttachmentMenuOpen) return undefined;
@@ -1682,17 +1409,6 @@ const appendFeed = useCallback((message) => {
               )}
             </div>
 
-            <button
-              type="button"
-              className={`icon-button action-button ${isGyroEnabled ? "toggled" : ""}`}
-              onClick={handleGyroToggle}
-              disabled={isSubmitting}
-              aria-label={isGyroEnabled ? "Disable gyroscope" : "Enable gyroscope"}
-              aria-pressed={isGyroEnabled}
-              title={isGyroEnabled ? "Gyroscope on" : "Gyroscope off"}
-            >
-              <GyroIcon />
-            </button>
           </div>
 
           <button
@@ -1788,15 +1504,6 @@ const appendFeed = useCallback((message) => {
         />
       </section>
 
-      {/* Hidden video for camera-based zero-velocity detection */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{ display: "none" }}
-        aria-hidden="true"
-      />
     </div>
   );
 };

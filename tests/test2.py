@@ -1,15 +1,15 @@
 # Test video streaming to a connected TV
+# Check the IPv4 address to update in 'host' parameter
 
 import asyncio
 import ctypes
 import sys as _sys
 import os as _os
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
-from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
 
 ctypes.windll.user32.SetProcessDPIAware()
 
@@ -21,73 +21,10 @@ from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
 from sd35 import Folder
-from stream import FrameBus, CvVideoTrack
-
-from pathlib import Path
-from aiohttp import web
+from stream import FrameBus, StreamingServer
 
 BASE_DIR = Path(__file__).resolve().parent
 VIEWER_HTML = BASE_DIR / "viewer.html"
-
-async def viewer(request):
-    return web.FileResponse(VIEWER_HTML)
-
-pcs = set()
-
-async def offer(request):
-    params = await request.json()
-    frame_bus = request.app["frame_bus"]
-    config = request.app["config"]
-
-    pc = RTCPeerConnection()
-    pcs.add(pc)
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        print("Connection state:", pc.connectionState)
-        if pc.connectionState in ("failed", "closed", "disconnected"):
-            await pc.close()
-            pcs.discard(pc)
-
-    track = CvVideoTrack(frame_bus, fallback_size=(config.WINDOW_H, config.WINDOW_W))
-    pc.addTrack(track)
-
-    offer_desc = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    await pc.setRemoteDescription(offer_desc)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return web.json_response(
-        {
-            "sdp": pc.localDescription.sdp,
-            "type": pc.localDescription.type,
-        }
-    )
-
-async def on_shutdown(app):
-    coros = [pc.close() for pc in pcs]
-    if coros:
-        await asyncio.gather(*coros)
-    pcs.clear()
-
-async def start_signaling_server(frame_bus, config):
-    app = web.Application()
-    app["frame_bus"] = frame_bus
-    app["config"] = config
-
-    app.router.add_get("/", viewer)
-    app.router.add_get("/viewer.html", viewer)
-    app.router.add_post("/offer", offer)
-
-    app.on_shutdown.append(on_shutdown)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "192.168.68.65", 8080)
-    await site.start()
-
-    print("Open viewer at http://192.168.68.65:8080/")
-    return runner
 
 def resize_to_fit_window(img, window_w, window_h):
     target_w = window_w
@@ -119,10 +56,14 @@ async def main():
         G=config.G,
         L=3,
         smooth=15,
+        dt = 1.0 / config.FPS,
     )
     folder = Folder(config.IMAGE_SIZE, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img)
+    sim_gradient_on = False
+    sim_goback_on = False
+    sim_constraints_on = False
 
     ray = RayTracer(
         W=config.WINDOW_W,
@@ -139,7 +80,7 @@ async def main():
     )
     ray_shape = 0
 
-    ms = Mouse(config.WINDOW_W, config.WINDOW_H)
+    ms = Mouse(1.0 / config.FPS, config.WINDOW_W, config.WINDOW_H)
 
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -147,41 +88,48 @@ async def main():
     cv2.setMouseCallback(config.APP_NAME, ms.mouse_callback)
 
     frame_bus = FrameBus()
-    runner = await start_signaling_server(frame_bus, config)
+    streaming = StreamingServer(
+        frame_bus=frame_bus,
+        config=config,
+        viewer_html=VIEWER_HTML,
+        host="192.168.68.61",
+        port=8080,
+    )
+    runner = await streaming.start()
 
     frame_dur = 1.0 / config.FPS
     next_tick = time.perf_counter()
     try:
         while True:
 
-            sim.inject_gradient()
+            # Simulate
+            if sim_gradient_on:
+                sim.inject_gradient()
 
             if ms.on:
-                sim.inject_mouse(
-                    np.array([ms.mouse_x, ms.mouse_y, 0.0]),
-                    20.0 * np.array([ms.mouse_vx, ms.mouse_vy, ms.mouse_vz])
-                )
-            sim.update(constraints_on=False, go_back_on=True)
+                sim.inject_mouse(ms.pos, ms.vel)
+            sim.update(constraints_on=sim_constraints_on, go_back_on=sim_goback_on)
 
+            # Keep FPS cadence on raytracing to save CPU, since it's the bottleneck
             now = time.perf_counter()
             if now < next_tick:
                 await asyncio.sleep(next_tick - now)
                 continue
-
             next_tick += frame_dur
             if now > next_tick + frame_dur:
                 next_tick = now + frame_dur
 
+            # Raytrace
             if ray_shape == 0:
                 frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
             elif ray_shape == 1:
-                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 2.0 * sim.r, 0.5 * sim.r, 4.5 * sim.r)
+                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
             elif ray_shape == 2:
-                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 1.4 * sim.r, 1.4 * sim.r, 0.6 * sim.r)
+                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
             elif ray_shape == 3:
-                frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
+                frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
             elif ray_shape == 4:
-                frame = ray.sphere(sim.xyz, sim.rgb, 1.4 * sim.r)
+                frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
             else:
                 frame = resize_to_fit_window(img, config.WINDOW_W, config.WINDOW_H)  
 
@@ -191,17 +139,23 @@ async def main():
             key = cv2.waitKeyEx(1)
             if key in (ord('q'), 27):
                 break
+            elif key == ord('b'):
+                sim_goback_on = not sim_goback_on
+            elif key == ord('c'):
+                sim_constraints_on = not sim_constraints_on
+            elif key == ord('g'):
+                sim_gradient_on = not sim_gradient_on
             elif key == ord('n'):
                 img = folder.load_image()
-                sim.new_image(img)
+                sim.new_image(img, depth_factor=0.0)
             elif key == ord('r'):
                 ray_shape += 1
                 if ray_shape >= 6:
                     ray_shape = 0
             elif key == ord('z'):
                 ray.fov -= 0.1
-                if ray.fov < 0.1:
-                    ray.fov = 2.0
+                if ray.fov < 0.05:
+                    ray.fov = 1.1
 
             await asyncio.sleep(0)
     finally:

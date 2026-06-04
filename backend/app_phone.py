@@ -6,7 +6,7 @@
 # # # # # # #
 
 # Phone App uses the phone sensors to bridge interaction with user and NonCarbon Artist
-# Has all the UI and design window
+# Has all the user command messages and settings
 # Input: Receives text or audio and/ or image bytes, receives commands in Admin mode
 # Output: Post messages in the bus with instructions
 # ----------------------------------------------------------------

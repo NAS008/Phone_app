@@ -6,8 +6,8 @@
 # # # # # # #
 
 # PC App uses a GPU PC to run OpticalFlow, Simulator and RayTracing on site
-# Has no UI, just a borderless display window
-# Input: Receives images from the bus to update Simulator gradients and xyz_goal
+# Detects UI gestures from mouse and camera and sounds from mic to interact with Simulator
+# Input: Receives images from the bus to inject gradients in Simulator and xyz_goal. Receives gestures or audio to inject in Simulator
 # Interpolates with OpticalFlow to get smooth color transitions between images while updates particles rgb
 # Does particles xyz simulation (heightmap, fluid, ui, constraints, collision, boundaries)
 # Output: Sends the current rendered frame when a like is received
@@ -15,12 +15,15 @@
 # ✓ Update sim gradients and xyz_goal
 # ✓ OpticalFlow interpolation, update rgb
 # ✓ Simulation update
+# ✗ Add camera interaction
+# ✗ Add mouse interaction
+# ✗ Add audio frequencies interaction
 # ✗ Add FLIP fluid
 # ✗ Add collisions
-# ✗ Add world boundaries
+# ✓ Add world boundaries
 # ✗ Add slime simulation
-# ✗ Fix gradient wind
-# ✗ Fix noise on ellipsoid
+# ✓ Fix gradient wind
+# ✓ Fix noise on ellipsoid
 # ✗ Fix detail on prisms with multiple intersect triangles
 # ✗ Fix insert triangle to reduce the number of hit cells
 
@@ -29,7 +32,6 @@ import io
 import urllib.request
 import urllib.parse
 import numpy as np
-import math
 import time
 import asyncio
 import ctypes
@@ -44,7 +46,7 @@ from bus import Bus
 from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
-from ui import Camera
+from ui import Camera, Mic, Mouse, OneEuro
 ctypes.windll.user32.SetProcessDPIAware()
 
 def get_first_part(parts, kind):
@@ -150,68 +152,9 @@ def resize_to_fit_window(img, window_w, window_h):
     frame = resized[y0:y0 + target_h, x0:x0 + target_w]
 
     return frame
-
-class LowPass:
-    def __init__(self, x0=0.0):
-        self.y = x0
-        self.ready = False
-
-    def apply(self, x, alpha):
-        if not self.ready:
-            self.y = x
-            self.ready = True
-        else:
-            self.y = alpha * x + (1.0 - alpha) * self.y
-        return self.y
-
-def smoothing_alpha(dt, cutoff):
-    r = 2.0 * math.pi * cutoff * dt
-    return r / (r + 1.0)
-
-class OneEuro:
-    def __init__(self, min_cutoff=1.2, beta=0.02, d_cutoff=1.0):
-        self.min_cutoff = min_cutoff
-        self.beta = beta
-        self.d_cutoff = d_cutoff
-        self.xf = LowPass()
-        self.dxf = LowPass()
-        self.t_prev = None
-        self.x_prev = None
-
-    def apply(self, x, t):
-        if self.t_prev is None:
-            self.t_prev = t
-            self.x_prev = x
-            return self.xf.apply(x, 1.0)
-
-        dt = max(1e-6, t - self.t_prev)
-        dx = (x - self.x_prev) / dt
-        ad = smoothing_alpha(dt, self.d_cutoff)
-        dx_hat = self.dxf.apply(dx, ad)
-
-        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
-        a = smoothing_alpha(dt, cutoff)
-        x_hat = self.xf.apply(x, a)
-
-        self.t_prev = t
-        self.x_prev = x
-        return x_hat
-        
+ 
 async def main():
     config = Config()
-
-    # Optical flow setup
-    of = OpticalFlow()
-
-    # Pointer setup
-    pc_cam_on = False
-    if pc_cam_on:
-        cam = Camera(config.POSE_MODEL)
-        cam.start()
-    pointer = [0.5, 0.5, 0.0]
-    pointer_goal = [0.5, 0.5, 0.0]
-
-    overlay_on = True
 
     # Simulator setup
     sim = Simulator(
@@ -248,7 +191,7 @@ async def main():
         ambient=config.ambient,
         shadow=config.shadow,
     )
-    ray_shape = 4
+    ray_shape = 3
     frame = img_a.copy()
     frames = deque()
     thumb_w = max(config.WINDOW_W // 8, 256)
@@ -256,13 +199,35 @@ async def main():
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
-
+    of = OpticalFlow()
     super = SuperResolution(config.MODELS_FOLDER)
+    overlay_on = True # To show or hide QR code
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
+
+    # UI setup
+    ui_channel = config.UI_CHANNEL
+    if ui_channel == "cam":
+        ui = Camera(config.UI_POSE_MODEL, dt=1.0 / config.FPS, width=640, height=480)
+        ui.start()
+    elif ui_channel == "mic":
+        ui = Mic(
+            sample_rate=16000,
+            block_size=1024,
+            channels=1,
+            gain=5.0,
+            decay=0.72,
+            num_bands=16,
+        )
+        ui.start()
+    elif ui_channel == "mouse":
+        ui = Mouse(dt=1.0 / config.FPS, width=config.WINDOW_W, height=config.WINDOW_H)
+        cv2.setMouseCallback(config.APP_NAME, ui.mouse_callback)
+    else:
+        ui = None
 
     # Bus setup
     bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
@@ -322,16 +287,6 @@ async def main():
         )
         kb = int(len(image_bytes) / 1024)
         print(f"✓ PC: got a like from {nickname} and sent the current frame {kb} KB")
-
-    async def on_user_gesture(session_id, nickname, x, y, z):
-        nonlocal pointer_goal
-
-        if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
-            return
-
-        pointer_goal[0] = max(0.0, min(1.0, x))
-        pointer_goal[1] = max(0.0, min(1.0, y))
-        pointer_goal[2] = z
 
     async def on_settings(params):
         nonlocal ray_shape, sim_constraints_on, sim_go_back_on, sim_gradient_on, sim_depth_factor, overlay_on
@@ -416,7 +371,6 @@ async def main():
 
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
     bus.on(Bus.USER_LIKE, on_user_like)
-    bus.on(Bus.USER_GESTURE, on_user_gesture)
     bus.on(Bus.USER_VIDEO, on_user_video)
     bus.on(Bus.SETTINGS, on_settings)
 
@@ -426,88 +380,57 @@ async def main():
     await bus.publish_session(session_id=session.session_id)
     qr_img = session.generate_qr_code()
 
-    render_frame_dur = 1.0 / config.FPS
-    release_frame_dur = 1.0 / config.FPS
+    # Time cadence
+    frame_dur = 1.0 / config.FPS
     next_tick = time.perf_counter()
-    next_release = next_tick
-
-    fx = OneEuro(min_cutoff=1.5, beta=0.03, d_cutoff=1.0)
-    fy = OneEuro(min_cutoff=1.5, beta=0.03, d_cutoff=1.0)
-    fz = OneEuro(min_cutoff=1.0, beta=0.02, d_cutoff=1.0)
     while True:
         await bus.poll()
 
+        # Simulate
+        # Keep FPS cadence to save CPU, since it's the bottleneck
         now = time.perf_counter()
+
+        if sim_gradient_on:
+            sim.inject_gradient(depth_factor=sim_depth_factor)
+        if ui_channel == "cam":
+            if ui.update(now):
+                sim.inject_mouse(ui.pos, ui.vel)
+        elif ui_channel == "mouse":
+            if ui.update(now):
+                sim.inject_mouse(ui.pos, ui.vel)
+        elif ui_channel == "mic":
+            bands, flux = ui.update()
+            if bands is not None:
+                sim.inject_audio(bands, flux)
+        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
+
         if now < next_tick:
             await asyncio.sleep(next_tick - now)
-        now = time.perf_counter()
-        next_tick += render_frame_dur
+            continue
+        next_tick += frame_dur
+        if now > next_tick + frame_dur:
+            next_tick = now + frame_dur
 
-        if now >= next_release:
-            if frames:
-                img_a = frames.popleft()
-                if ray_shape != 5:
-                    sim.new_image(img_a, depth_factor=sim_depth_factor)
-            next_release += release_frame_dur
-            if now > next_release + release_frame_dur:
-                next_release = now + release_frame_dur
+        if frames:
+            img_a = frames.popleft()
+            if ray_shape != 5:
+                sim.new_image(img_a, depth_factor=sim_depth_factor)
 
-        if ray_shape == 5:         
+        # Raytrace
+        if ray_shape == 0:
+            frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
+        elif ray_shape == 1:
+            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
+        elif ray_shape == 2:
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
+        elif ray_shape == 3:
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
+        elif ray_shape == 4:
+            frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
+        else:
             img_aux = cv2.resize(img_a, (config.IMAGE_SIZE // 2, config.IMAGE_SIZE // 2), interpolation=cv2.INTER_AREA)
             img_aux = super.super_image(img_aux)
             frame = resize_to_fit_window(img_aux, config.WINDOW_W, config.WINDOW_H)  
-        else:
-            if pc_cam_on:
-                ok, canvas, frame, result = cam.read()
-                if not ok:
-                    continue
-
-                hand = cam.get_hand_raw(result)
-                if hand is not None:
-                    raw_x = float(np.clip(hand["x"], 0.0, 1.0))
-                    raw_y = float(np.clip(1.0 - hand["y"], 0.0, 1.0))
-
-                    pointer_goal[0] = fx.apply(raw_x, now)
-                    pointer_goal[1] = fy.apply(raw_y, now)
-
-            pointer_prior_x = pointer[0]
-            pointer_prior_y = pointer[1]
-            follow = 0.18
-            pointer[0] += follow * (pointer_goal[0] - pointer[0])
-            pointer[1] += follow * (pointer_goal[1] - pointer[1])
-            dt = render_frame_dur
-            vx = (pointer[0] - pointer_prior_x) / max(dt, 1e-6)
-            vy = (pointer[1] - pointer_prior_y) / max(dt, 1e-6)
-            # clamp spikes
-            vmax = 1.5
-            vx = float(np.clip(vx, -vmax, vmax))
-            vy = float(np.clip(vy, -vmax, vmax))
-            # optional extra smoothing
-            vel_smooth = 0.25
-            if not hasattr(main, "_vx"):
-                main._vx = 0.0
-                main._vy = 0.0
-            main._vx += vel_smooth * (vx - main._vx)
-            main._vy += vel_smooth * (vy - main._vy)
-            vz = 0.15 * np.hypot(main._vx, main._vy)
-            
-            sim.inject_mouse(pointer, 20.0 * np.array([main._vx, main._vy, vz]))
-
-            if sim_gradient_on and ray_shape != 5:
-                sim.inject_gradient(depth_factor=sim_depth_factor)
-
-            sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
-
-            if ray_shape == 0:
-                frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
-            elif ray_shape == 1:
-                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
-            elif ray_shape == 2:
-                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
-            elif ray_shape == 3:
-                frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
-            else:
-                frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
@@ -525,6 +448,10 @@ async def main():
             break
 
     cv2.destroyAllWindows()
+    if ui_channel == "cam":
+        ui.close()
+    elif ui_channel == "mic":
+        ui.stop()
     await bus.close()
 
 if __name__ == '__main__':

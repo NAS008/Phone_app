@@ -149,6 +149,85 @@ def k_inject_mouse(
         v_prev[tid] += mv.y * strength * wt
         w_prev[tid] += mv.z * strength * wt
 
+@wp.func
+def smoothstep01(x: float) -> float:
+    t = wp.clamp(x, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+@wp.func
+def sample_bands_linear(bands: wp.array(dtype=float), n: int, u: float) -> float:
+    uu = wp.clamp(u, 0.0, 0.9999)
+    x = uu * float(n - 1)
+    i0 = int(x)
+    i1 = wp.min(i0 + 1, n - 1)
+    t = x - float(i0)
+    return (1.0 - t) * bands[i0] + t * bands[i1]
+
+@wp.kernel
+def k_inject_audio_field(
+    u_prev: wp.array(dtype=float),
+    v_prev: wp.array(dtype=float),
+    w_prev: wp.array(dtype=float),
+    bands: wp.array(dtype=float),
+    num_bands: int,
+    flux: float,
+    strength: float,
+    G: wp.vec3i
+):
+    tid = wp.tid()
+    i = tid % G.x
+    j = (tid // G.x) % G.y
+    k = tid // (G.x * G.y)
+
+    x = (float(i) + 0.5) / float(G.x)
+    y = (float(j) + 0.5) / float(G.y)
+    z = (float(k) + 0.5) / float(G.z)
+
+    fu = wp.clamp(x + 0.15 * (z - 0.5), 0.0, 1.0)
+
+    a0 = sample_bands_linear(bands, num_bands, fu)
+
+    eps = 1.0 / float(num_bands)
+    aL = sample_bands_linear(bands, num_bands, wp.clamp(fu - eps, 0.0, 1.0))
+    aR = sample_bands_linear(bands, num_bands, wp.clamp(fu + eps, 0.0, 1.0))
+    dax = aR - aL
+
+    bottom = smoothstep01(1.0 - y)
+    top = smoothstep01(y)
+    midz = 1.0 - 2.0 * wp.abs(z - 0.5)
+
+    phase = 0.5 + 0.5 * wp.sin(7.0 * x + 8.0 * y + 6.0 * z)
+    amp = a0 * (0.65 + 0.35 * phase)
+
+    ux = 0.0
+    vy = 0.0
+    wz = 0.0
+
+    # weaker upward injection, mostly near lower half
+    vy += strength * 0.45 * amp * bottom * (1.0 + 0.5 * flux)
+
+    # explicit downward return in upper half to avoid ceiling parking
+    vy -= strength * 0.38 * amp * top
+
+    # lateral spread from spectral gradient
+    ux += strength * 1.35 * dax * (0.6 + 0.4 * bottom)
+
+    # depth circulation
+    wz += strength * 0.60 * amp * (z - 0.5) * (0.5 + 0.5 * bottom)
+
+    # slight recentering
+    ux += strength * (-0.10) * (x - 0.5) * a0
+    wz += strength * (-0.08) * (z - 0.5) * a0
+
+    # highs create finer side/depth shimmer, not extra lift
+    hi = sample_bands_linear(bands, num_bands, wp.clamp(0.7 + 0.3 * x, 0.0, 1.0))
+    ux += strength * 0.30 * hi * midz * (0.5 - z)
+    wz += strength * 0.24 * hi * (x - 0.5)
+
+    u_prev[tid] += ux
+    v_prev[tid] += vy
+    w_prev[tid] += wz
+
 @wp.kernel
 def k_set_velocity_fluid(
     u_prev: wp.array(dtype=float), v_prev: wp.array(dtype=float), w_prev: wp.array(dtype=float),
@@ -615,6 +694,21 @@ class Simulator:
             0.1, 1.0, self.G
         ], device="cuda")
 
+    def inject_audio(self, bands, flux):
+        bands = np.asarray(bands, dtype=np.float32)
+        bands = np.clip(bands, 0.0, 1.0)
+        bands = np.sqrt(bands)
+
+        bands_wp = wp.array(bands, dtype=float, device="cuda")
+        wp.launch(k_inject_audio_field, dim=self.G3, inputs=[
+            self.u_prev, self.v_prev, self.w_prev,
+            bands_wp,
+            int(bands.shape[0]),
+            float(flux),
+            0.08,
+            self.G
+        ], device="cuda")
+
     def _apply_constraints(self):
         self.xyz_corr.zero_()
         for bond, l0 in [
@@ -663,7 +757,7 @@ class Simulator:
 
         if go_back_on:
             wp.launch(k_goal_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_goal, 0.01
+                self.xyz, self.xyz_goal, 0.02
             ], device="cuda")
 
         self._apply_constraints()

@@ -10,7 +10,6 @@ class Bus:
     USER_JOINED = "user_joined"
     USER_MESSAGE = "user_message"
     USER_LIKE = "user_like"
-    USER_GESTURE = "user_gesture"
     USER_VIDEO = "user_video"
     AI_MESSAGE_TO_PC = "ai_message_to_pc"
     AI_MESSAGE_TO_PHONE = "ai_message_to_phone"
@@ -21,7 +20,6 @@ class Bus:
         USER_JOINED,
         USER_MESSAGE,
         USER_LIKE,
-        USER_GESTURE,
         USER_VIDEO,
         AI_MESSAGE_TO_PC,
         AI_MESSAGE_TO_PHONE,
@@ -132,15 +130,6 @@ class Bus:
             "nickname": nickname,
         })
 
-    async def publish_user_gesture(self, session_id="0", nickname="Nuno", x=0.0, y=0.0, z=0.0):
-        self._publish(self.USER_GESTURE, {
-            "session_id": str(session_id),
-            "nickname": nickname,
-            "x": float(x),
-            "y": float(y),
-            "z": float(z),
-        })
-
     async def publish_ai_message_to_pc(self, session_id="0", nickname="NonCarbon Artist",
                                        text=None, image_bytes=None, image_mime_type="image/jpeg",
                                        image_purpose="output", turn_id=None, final=True):
@@ -222,16 +211,6 @@ class Bus:
                     handler,
                     payload.get("session_id"),
                     payload.get("nickname"),
-                )
-
-            elif channel == self.USER_GESTURE:
-                return await self._call_handler(
-                    handler,
-                    payload.get("session_id"),
-                    payload.get("nickname"),
-                    payload.get("x", 0.0),
-                    payload.get("y", 0.0),
-                    payload.get("z", 0.0),
                 )
 
             elif channel == self.SETTINGS:

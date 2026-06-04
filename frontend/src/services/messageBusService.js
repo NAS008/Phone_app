@@ -75,20 +75,6 @@ class MessageBusService {
   }
 
   /**
-   * Publish USER_GESTURE — gyroscope / position data.
-   * app_pc uses x, y, z to move the pointer in the particle sim.
-   */
-  async sendUserGesture({ x, y, z = 0.0, sessionId, nickname }) {
-    return this.postMsgpack("/api/publish/user_gesture", {
-      session_id: String(sessionId),
-      nickname: String(nickname),
-      x: Number(x),
-      y: Number(y),
-      z: Number(z),
-    });
-  }
-
-  /**
    * Publish SETTINGS — controls AI mode, ray shape, sim constraints, zoom.
    */
   async sendSettings({ sessionId, nickname, ...settings }) {

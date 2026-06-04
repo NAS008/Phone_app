@@ -976,7 +976,7 @@ const appendFeed = useCallback((message) => {
         <div className="assistant-copy">
           <h1>{nickname ? `Hello ${nickname}` : "Hello"}</h1>
           <p>
-            Guide the artwork with an idea, image or voice note
+            Guide the artwork with voice, images or ideas
           </p>
         </div>
       </header>

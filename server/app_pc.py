@@ -191,7 +191,7 @@ async def main():
         ambient=config.ambient,
         shadow=config.shadow,
     )
-    ray_shape = 3
+    ray_shape = 1
     frame = img_a.copy()
     frames = deque()
     thumb_w = max(config.WINDOW_W // 8, 256)
@@ -209,25 +209,22 @@ async def main():
     cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
 
     # UI setup
-    ui_channel = config.UI_CHANNEL
-    if ui_channel == "cam":
-        ui = Camera(config.UI_POSE_MODEL, dt=1.0 / config.FPS, width=640, height=480)
-        ui.start()
-    elif ui_channel == "mic":
-        ui = Mic(
-            sample_rate=16000,
-            block_size=1024,
-            channels=1,
-            gain=5.0,
-            decay=0.72,
-            num_bands=16,
-        )
-        ui.start()
-    elif ui_channel == "mouse":
-        ui = Mouse(dt=1.0 / config.FPS, width=config.WINDOW_W, height=config.WINDOW_H)
-        cv2.setMouseCallback(config.APP_NAME, ui.mouse_callback)
-    else:
-        ui = None
+    cam = Camera(config.UI_POSE_MODEL, dt=1.0 / config.FPS, width=640, height=480)
+    cam.start()
+
+    mic = None
+    # mic = Mic(
+    #     sample_rate=16000,
+    #     block_size=1024,
+    #     channels=1,
+    #     gain=5.0,
+    #     decay=0.72,
+    #     num_bands=16,
+    # )
+    # mic.start()
+
+    mouse = Mouse(dt=1.0 / config.FPS, width=config.WINDOW_W, height=config.WINDOW_H)
+    cv2.setMouseCallback(config.APP_NAME, mouse.callback)
 
     # Bus setup
     bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
@@ -386,24 +383,8 @@ async def main():
     while True:
         await bus.poll()
 
-        # Simulate
         # Keep FPS cadence to save CPU, since it's the bottleneck
         now = time.perf_counter()
-
-        if sim_gradient_on:
-            sim.inject_gradient(depth_factor=sim_depth_factor)
-        if ui_channel == "cam":
-            if ui.update(now):
-                sim.inject_mouse(ui.pos, ui.vel)
-        elif ui_channel == "mouse":
-            if ui.update(now):
-                sim.inject_mouse(ui.pos, ui.vel)
-        elif ui_channel == "mic":
-            bands, flux = ui.update()
-            if bands is not None:
-                sim.inject_audio(bands, flux)
-        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
-
         if now < next_tick:
             await asyncio.sleep(next_tick - now)
             continue
@@ -415,6 +396,21 @@ async def main():
             img_a = frames.popleft()
             if ray_shape != 5:
                 sim.new_image(img_a, depth_factor=sim_depth_factor)
+
+        # Simulate
+        if sim_gradient_on:
+            sim.inject_gradient(depth_factor=sim_depth_factor)
+        if cam is not None:
+            if cam.update(now):
+                sim.inject_mouse(cam.pos, cam.vel)
+        if mouse is not None:
+            if mouse.update(now):
+                sim.inject_mouse(mouse.pos, mouse.vel)
+        if mic is not None:
+            bands, flux = mic.update()
+            if bands is not None:
+                sim.inject_audio(bands, flux)
+        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
 
         # Raytrace
         if ray_shape == 0:
@@ -448,10 +444,10 @@ async def main():
             break
 
     cv2.destroyAllWindows()
-    if ui_channel == "cam":
-        ui.close()
-    elif ui_channel == "mic":
-        ui.stop()
+    if cam is not None:
+        cam.close()
+    if mic is not None:
+        mic.stop()
     await bus.close()
 
 if __name__ == '__main__':

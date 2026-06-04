@@ -81,7 +81,7 @@ class Mouse:
         self.pos = np.array([0.5, 0.5, 0.0])
         self.vel = np.array([0.0, 0.0, 0.0])
 
-    def mouse_callback(self, event, x, y, flags, param):
+    def callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_MOUSEMOVE:
             old_pos = self.pos.copy()
             self.pos[0] = x / self.W

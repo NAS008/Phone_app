@@ -1,6 +1,6 @@
 /* Main container styles */
 .app-container {
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
   margin: 0;
   padding: 0;
   position: relative;
@@ -10,7 +10,7 @@
 
   /* removed because spotify player isnt being used */
   /* padding-bottom: 90px; */
-  min-height: 100dvh;
+  min-height: var(--app-height, 100dvh);
 }
 
 /* Conditionally apply styles based on route */

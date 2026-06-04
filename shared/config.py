@@ -12,7 +12,7 @@ class Config:
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
     WINDOW_W, WINDOW_H = 2048, 2048#512, 512#1080, 1080#2160, 2160
-    IMAGE_SIZE = 1024
+    IMAGE_SIZE = 512
     GRID_SIZE = 128
     PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H

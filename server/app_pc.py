@@ -576,13 +576,13 @@ async def main():
             if ray_shape == 0:
                 frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
             elif ray_shape == 1:
-                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 2.0 * sim.r, 0.5 * sim.r, 4.5 * sim.r)
+                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
             elif ray_shape == 2:
-                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 2.8 * sim.r, 2.8 * sim.r, 0.6 * sim.r)
+                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
             elif ray_shape == 3:
                 frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
             else:
-                frame = ray.sphere(sim.xyz, sim.rgb, 1.2 * sim.r)
+                frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
 
         frame_bus.publish(frame)
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)

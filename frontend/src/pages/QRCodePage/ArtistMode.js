@@ -313,7 +313,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsMode, setSettingsMode] = useState(0);
   const [settingsStyle, setSettingsStyle] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
-  const [settingsZoom, setSettingsZoom] = useState(1.1);
+  const [settingsZoom, setSettingsZoom] = useState(1.0);
   const [settingsDepthFactor, setSettingsDepthFactor] = useState(1.0);
   const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
@@ -1195,23 +1195,6 @@ const appendFeed = useCallback((message) => {
             </div>
 
             <div className="settings-section settings-row">
-              <span className="settings-label">Go Back</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settingsGoBackOn}
-                className={`settings-toggle${settingsGoBackOn ? " on" : ""}`}
-                onClick={() => {
-                  const next = !settingsGoBackOn;
-                  setSettingsGoBackOn(next);
-                  sendSetting("go_back_on", next);
-                }}
-              >
-                <span className="settings-toggle__thumb" />
-              </button>
-            </div>
-
-            <div className="settings-section settings-row">
               <span className="settings-label">Show QR Code</span>
               <button
                 type="button"
@@ -1245,6 +1228,23 @@ const appendFeed = useCallback((message) => {
               </button>
             </div>
 
+            <div className="settings-section settings-row">
+              <span className="settings-label">Go Back</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settingsGoBackOn}
+                className={`settings-toggle${settingsGoBackOn ? " on" : ""}`}
+                onClick={() => {
+                  const next = !settingsGoBackOn;
+                  setSettingsGoBackOn(next);
+                  sendSetting("go_back_on", next);
+                }}
+              >
+                <span className="settings-toggle__thumb" />
+              </button>
+            </div>
+
             <div className="settings-section">
               <div className="settings-row">
                 <span className="settings-label">Constraints Mode</span>
@@ -1254,10 +1254,10 @@ const appendFeed = useCallback((message) => {
                 type="range"
                 className="settings-slider"
                 min="0"
-                max="1"
+                max="2"
                 step="1"
                 value={settingsConstraintsMode}
-                style={{ "--pct": sliderPct(settingsConstraintsMode, 0, 1) }}
+                style={{ "--pct": sliderPct(settingsConstraintsMode, 0, 2) }}
                 onChange={(e) => setSettingsConstraintsMode(parseInt(e.target.value, 10))}
                 onMouseUp={(e) => sendSetting("constraints_mode", parseInt(e.target.value, 10))}
                 onTouchEnd={() => sendSetting("constraints_mode", settingsConstraintsMode)}
@@ -1273,10 +1273,10 @@ const appendFeed = useCallback((message) => {
                 type="range"
                 className="settings-slider"
                 min="0"
-                max="2"
+                max="3"
                 step="1"
                 value={settingsGradientMode}
-                style={{ "--pct": sliderPct(settingsGradientMode, 0, 2) }}
+                style={{ "--pct": sliderPct(settingsGradientMode, 0, 3) }}
                 onChange={(e) => setSettingsGradientMode(parseInt(e.target.value, 10))}
                 onMouseUp={(e) => sendSetting("gradient_mode", parseInt(e.target.value, 10))}
                 onTouchEnd={() => sendSetting("gradient_mode", settingsGradientMode)}

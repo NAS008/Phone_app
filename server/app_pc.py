@@ -36,6 +36,7 @@ import time
 import asyncio
 import ctypes
 import time
+import concurrent.futures
 from collections import deque
 from PIL import Image
 import sys as _sys, os as _os
@@ -156,28 +157,28 @@ def resize_to_fit_window(img, window_w, window_h):
 async def main():
     config = Config()
 
+    of = OpticalFlow()
+    super = SuperResolution(config.MODELS_FOLDER)
+
     # Simulator setup
     sim = Simulator(
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
         G=config.G, L=config.LAYERS,
-        smooth=15,
-        dt = 1.0 / config.FPS,
+        smooth=3,
+        dt = 1.0 / config.FPS_SIM,
     )
-    sim_constraints_on = True
     sim_go_back_on = True
-    sim_gradient_on = False
+    sim_constraints_mode = 0
+    sim_gradient_mode = 0
     sim_depth_factor = 1.0
-    #img_a = cv2.imread(r"..\..\brand\logo_square.png")
     img_a = cv2.imread(r"..\..\input\19.png")
-    if img_a is None:
-        img_a = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
-    else:
-        img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-    sim.new_image(img_a)
+    img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+    img_a_hires = super.upscale(img_a)
+    sim.new_image(img_a, depth_factor=sim_depth_factor)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
 
-    # Ray tracer setup
+    # Raytracer setup
     ray = RayTracer(
         W=config.WINDOW_W,
         H=config.WINDOW_H,
@@ -191,16 +192,18 @@ async def main():
         ambient=config.ambient,
         shadow=config.shadow,
     )
-    ray_shape = 1
+    ray_shape = 0
     frame = img_a.copy()
     frames = deque()
+    frames_hires = deque()
+    pending_images = asyncio.Queue(maxsize=8)
+    processing_task = None
+    processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     thumb_w = max(config.WINDOW_W // 8, 256)
     thumb_h = int(thumb_w * config.WINDOW_H / config.WINDOW_W)
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
-    of = OpticalFlow()
-    super = SuperResolution(config.MODELS_FOLDER)
     overlay_on = True # To show or hide QR code
 
     # Window setup
@@ -209,8 +212,9 @@ async def main():
     cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
 
     # UI setup
-    cam = Camera(config.UI_POSE_MODEL, dt=1.0 / config.FPS, width=640, height=480)
-    cam.start()
+    cam = None
+    # cam = Camera(config.UI_POSE_MODEL, dt=1.0 / config.FPS, width=640, height=480)
+    # cam.start()
 
     mic = None
     # mic = Mic(
@@ -223,7 +227,7 @@ async def main():
     # )
     # mic.start()
 
-    mouse = Mouse(dt=1.0 / config.FPS, width=config.WINDOW_W, height=config.WINDOW_H)
+    mouse = Mouse(dt=1.0 / config.FPS_SIM, width=config.WINDOW_W, height=config.WINDOW_H)
     cv2.setMouseCallback(config.APP_NAME, mouse.callback)
 
     # Bus setup
@@ -231,8 +235,6 @@ async def main():
     await bus.connect()
 
     async def on_ai_message(session_id, nickname, parts, payload):
-        nonlocal img_a
-
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
 
@@ -241,33 +243,96 @@ async def main():
             return
 
         kb = int(len(image_bytes) / 1024)
-        print(f"✓ PC: message received with image {kb} KB from {nickname}")
 
+        if pending_images.full():
+            try:
+                pending_images.get_nowait()
+                pending_images.task_done()
+                print("⚠ PC: processing backlog full, dropped oldest pending image")
+            except asyncio.QueueEmpty:
+                pass
+
+        await pending_images.put((nickname, image_bytes))
+        print(f"✓ PC: queued image {kb} KB from {nickname}, pending queue size is now {pending_images.qsize()}")
+
+    def process_image_payload(ray_shape_value, image_bytes, start_img, start_img_hires):
         buf = np.frombuffer(image_bytes, dtype=np.uint8)
         img_b = cv2.imdecode(buf, cv2.IMREAD_COLOR)
         if img_b is None:
-            print("✗ PC: failed to decode received image")
-            return
+            return {"ok": False, "error": "✗ PC: failed to decode received image"}
+
+        if ray_shape_value == 5:
+            img_b_hires = super.upscale(img_b)
+            interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
+            generated_frames = [interp for interp in (interpolated or []) if interp is not None]
+            generated_frames.append(img_b_hires)
+            return {
+                "ok": True,
+                "mode": "hires",
+                "target": img_b_hires,
+                "frames": generated_frames,
+            }
 
         img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-
-        start_img = frames[-1] if frames else img_a
         interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
+        generated_frames = [interp for interp in (interpolated or []) if interp is not None]
+        generated_frames.append(img_b)
+        return {
+            "ok": True,
+            "mode": "normal",
+            "target": img_b,
+            "frames": generated_frames,
+        }
 
-        added = 0
-        if interpolated is not None:
-            for interp in interpolated:
-                if interp is not None:
-                    frames.append(interp)
-                    added += 1
+    async def kick_processing():
+        nonlocal img_a, img_a_hires, processing_task, ray_shape
 
-        frames.append(img_b)
-        added += 1
-        img_a = img_b
+        if processing_task is not None and not processing_task.done():
+            return
+        if pending_images.empty():
+            return
 
-        print(f"✓ PC: appended {added} frames, queue size is now {len(frames)} at {config.FPS} FPS")
-        await bus.publish_settings(pc_queue_size=len(frames))
+        nickname, image_bytes = await pending_images.get()
+        start_img = frames[-1] if frames else img_a
+        start_img_hires = frames_hires[-1] if frames_hires else img_a_hires
+        loop = asyncio.get_running_loop()
 
+        async def runner():
+            nonlocal img_a, img_a_hires
+            try:
+                result = await loop.run_in_executor(
+                    processing_executor,
+                    process_image_payload,
+                    ray_shape,
+                    image_bytes,
+                    start_img,
+                    start_img_hires,
+                )
+                if not result.get("ok"):
+                    print(result.get("error", "✗ PC: image processing failed"))
+                    return
+
+                if result["mode"] == "hires":
+                    for interp in result["frames"]:
+                        frames_hires.append(interp)
+                    img_a_hires = result["target"]
+                    print(
+                        f"✓ PC: processed hires image from {nickname}, appended {len(result['frames'])} frames, "
+                        f"hires queue size is now {len(frames_hires)}, pending queue {pending_images.qsize()}"
+                    )
+                else:
+                    for interp in result["frames"]:
+                        frames.append(interp)
+                    img_a = result["target"]
+                    print(
+                        f"✓ PC: processed image from {nickname}, appended {len(result['frames'])} frames, "
+                        f"queue size is now {len(frames)}, pending queue {pending_images.qsize()}"
+                    )
+            finally:
+                pending_images.task_done()
+
+        processing_task = asyncio.create_task(runner())
+       
     async def on_user_like(session_id, nickname):
         nonlocal frame
 
@@ -286,23 +351,34 @@ async def main():
         print(f"✓ PC: got a like from {nickname} and sent the current frame {kb} KB")
 
     async def on_settings(params):
-        nonlocal ray_shape, sim_constraints_on, sim_go_back_on, sim_gradient_on, sim_depth_factor, overlay_on
+        nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_depth_factor, overlay_on
+        nonlocal img_a, img_a_hires
 
-        if 'constraints_on' in params:
-            sim_constraints_on = bool(params['constraints_on'])
-            print(f"✓ PC: sim constraints set to {sim_constraints_on}")
+        if 'shape' in params:
+            ray_shape = int(params['shape'])
+            if ray_shape == 5:
+                start_img = frames[-1] if frames else img_a
+                img_a_hires = super.upscale(start_img)
+            else:
+                start_img = frames_hires[-1] if frames_hires else img_a_hires
+                img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            print(f"✓ PC: ray shape set to {ray_shape}")
 
+        if 'overlay_on' in params:
+            overlay_on = bool(params['overlay_on'])
+            print(f"✓ PC: overlay set to {overlay_on}")
+            
         if 'go_back_on' in params:
             sim_go_back_on = bool(params['go_back_on'])
             print(f"✓ PC: sim go back set to {sim_go_back_on}")
 
-        if 'gradient_on' in params:
-            sim_gradient_on = bool(params['gradient_on'])
-            print(f"✓ PC: sim gradient set to {sim_gradient_on}")
+        if 'constraints_mode' in params:
+            sim_constraints_mode = int(params['constraints_mode'])
+            print(f"✓ PC: sim constraints set to {sim_constraints_mode}")
 
-        if 'shape' in params:
-            ray_shape = int(params['shape'])
-            print(f"✓ PC: ray shape set to {ray_shape}")
+        if 'gradient_mode' in params:
+            sim_gradient_mode = int(params['gradient_mode'])
+            print(f"✓ PC: sim gradient set to {sim_gradient_mode}")
 
         if 'zoom' in params:
             ray.fov = float(params['zoom'])
@@ -311,10 +387,6 @@ async def main():
         if 'depth_factor' in params:
             sim_depth_factor = float(params['depth_factor'])
             print(f"✓ PC: sim depth factor set to {sim_depth_factor:.2f}")
-        
-        if 'overlay_on' in params:
-            overlay_on = bool(params['overlay_on'])
-            print(f"✓ PC: overlay set to {overlay_on}")
 
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
@@ -378,43 +450,61 @@ async def main():
     qr_img = session.generate_qr_code()
 
     # Time cadence
-    frame_dur = 1.0 / config.FPS
-    next_tick = time.perf_counter()
+    ray_period = 1.0 / config.FPS
+    sim_period = 1.0 / config.FPS_SIM
+    now = time.perf_counter()
+    next_ray_tick = now
+    next_sim_tick = now
     while True:
         await bus.poll()
+        await kick_processing()
 
         # Keep FPS cadence to save CPU, since it's the bottleneck
         now = time.perf_counter()
-        if now < next_tick:
-            await asyncio.sleep(next_tick - now)
+        sim_step_count = 0
+        while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
+            # UI
+            if cam is not None:
+                if cam.update(now):
+                    sim.inject_mouse(cam.pos, cam.vel)
+            if mouse is not None:
+                if mouse.update(now):
+                    sim.inject_mouse(mouse.pos, mouse.vel)
+            if mic is not None:
+                bands, flux = mic.update()
+                if bands is not None:
+                    sim.inject_audio(bands, flux)
+            # Simulate
+            sim.update(
+                go_back_on=sim_go_back_on,
+                constraints_mode=sim_constraints_mode,
+                gradient_mode=sim_gradient_mode
+            )
+            sim_step_count += 1
+            next_sim_tick += sim_period
+        # If we fell too far behind, drop backlog instead of spiraling
+        if now > next_sim_tick + sim_period * config.MAX_SIM_STEPS_PER_LOOP:
+            next_sim_tick = now + sim_period
+        # Raytrace only on visual FPS cadence
+        if now < next_ray_tick:
+            await asyncio.sleep(min(next_ray_tick - now, sim_period))
             continue
-        next_tick += frame_dur
-        if now > next_tick + frame_dur:
-            next_tick = now + frame_dur
+        next_ray_tick += ray_period
+        if now > next_ray_tick + ray_period:
+            next_ray_tick = now + ray_period
 
-        if frames:
-            img_a = frames.popleft()
-            if ray_shape != 5:
+        if ray_shape == 5:
+            if frames_hires:
+                img_a_hires = frames_hires.popleft()
+        else:
+            if frames:
+                img_a = frames.popleft()
                 sim.new_image(img_a, depth_factor=sim_depth_factor)
-
-        # Simulate
-        if sim_gradient_on:
-            sim.inject_gradient(depth_factor=sim_depth_factor)
-        if cam is not None:
-            if cam.update(now):
-                sim.inject_mouse(cam.pos, cam.vel)
-        if mouse is not None:
-            if mouse.update(now):
-                sim.inject_mouse(mouse.pos, mouse.vel)
-        if mic is not None:
-            bands, flux = mic.update()
-            if bands is not None:
-                sim.inject_audio(bands, flux)
-        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_go_back_on)
 
         # Raytrace
         if ray_shape == 0:
-            frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
+            frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
+            #frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
         elif ray_shape == 1:
             frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
         elif ray_shape == 2:
@@ -424,9 +514,7 @@ async def main():
         elif ray_shape == 4:
             frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
         else:
-            img_aux = cv2.resize(img_a, (config.IMAGE_SIZE // 2, config.IMAGE_SIZE // 2), interpolation=cv2.INTER_AREA)
-            img_aux = super.super_image(img_aux)
-            frame = resize_to_fit_window(img_aux, config.WINDOW_W, config.WINDOW_H)  
+            frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
@@ -448,6 +536,9 @@ async def main():
         cam.close()
     if mic is not None:
         mic.stop()
+    if processing_task is not None:
+        await asyncio.gather(processing_task, return_exceptions=True)
+    processing_executor.shutdown(wait=False, cancel_futures=True)
     await bus.close()
 
 if __name__ == '__main__':

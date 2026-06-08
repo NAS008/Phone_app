@@ -315,9 +315,9 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsShape, setSettingsShape] = useState(0);
   const [settingsZoom, setSettingsZoom] = useState(1.1);
   const [settingsDepthFactor, setSettingsDepthFactor] = useState(1.0);
-  const [settingsConstraintsOn, setSettingsConstraintsOn] = useState(true);
+  const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
-  const [settingsGradientOn, setSettingsGradientOn] = useState(false);
+  const [settingsGradientMode, setSettingsGradientMode] = useState(0);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
   const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
   const galleryInputRef = useRef(null);
@@ -1195,23 +1195,6 @@ const appendFeed = useCallback((message) => {
             </div>
 
             <div className="settings-section settings-row">
-              <span className="settings-label">Constraints</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settingsConstraintsOn}
-                className={`settings-toggle${settingsConstraintsOn ? " on" : ""}`}
-                onClick={() => {
-                  const next = !settingsConstraintsOn;
-                  setSettingsConstraintsOn(next);
-                  sendSetting("constraints_on", next);
-                }}
-              >
-                <span className="settings-toggle__thumb" />
-              </button>
-            </div>
-
-            <div className="settings-section settings-row">
               <span className="settings-label">Go Back</span>
               <button
                 type="button"
@@ -1222,23 +1205,6 @@ const appendFeed = useCallback((message) => {
                   const next = !settingsGoBackOn;
                   setSettingsGoBackOn(next);
                   sendSetting("go_back_on", next);
-                }}
-              >
-                <span className="settings-toggle__thumb" />
-              </button>
-            </div>
-
-            <div className="settings-section settings-row">
-              <span className="settings-label">Gradient</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settingsGradientOn}
-                className={`settings-toggle${settingsGradientOn ? " on" : ""}`}
-                onClick={() => {
-                  const next = !settingsGradientOn;
-                  setSettingsGradientOn(next);
-                  sendSetting("gradient_on", next);
                 }}
               >
                 <span className="settings-toggle__thumb" />
@@ -1277,6 +1243,44 @@ const appendFeed = useCallback((message) => {
               >
                 <span className="settings-toggle__thumb" />
               </button>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">Constraints Mode</span>
+                <span className="settings-value">{settingsConstraintsMode}</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min="0"
+                max="1"
+                step="1"
+                value={settingsConstraintsMode}
+                style={{ "--pct": sliderPct(settingsConstraintsMode, 0, 1) }}
+                onChange={(e) => setSettingsConstraintsMode(parseInt(e.target.value, 10))}
+                onMouseUp={(e) => sendSetting("constraints_mode", parseInt(e.target.value, 10))}
+                onTouchEnd={() => sendSetting("constraints_mode", settingsConstraintsMode)}
+              />
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">Gradient Mode</span>
+                <span className="settings-value">{settingsGradientMode}</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min="0"
+                max="2"
+                step="1"
+                value={settingsGradientMode}
+                style={{ "--pct": sliderPct(settingsGradientMode, 0, 2) }}
+                onChange={(e) => setSettingsGradientMode(parseInt(e.target.value, 10))}
+                onMouseUp={(e) => sendSetting("gradient_mode", parseInt(e.target.value, 10))}
+                onTouchEnd={() => sendSetting("gradient_mode", settingsGradientMode)}
+              />
             </div>
 
             <div className="settings-section">

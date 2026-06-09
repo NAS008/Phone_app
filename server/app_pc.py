@@ -486,7 +486,17 @@ async def main():
             sim_go_back_on        = director.sim_go_back
             sim_constraints_mode  = director.sim_constraints_mode
             sim_gradient_mode     = director.sim_gradient_mode
+            prev_ray_shape = ray_shape
             ray_shape             = director.ray_shape
+            if ray_shape != prev_ray_shape:
+                if ray_shape == 5:
+                    start_img = frames[-1] if frames else img_a
+                    img_a_hires = super.upscale(start_img)
+                    print(f"✓ PC: director → flat mode, upscaled image")
+                elif prev_ray_shape == 5:
+                    start_img = frames_hires[-1] if frames_hires else img_a_hires
+                    img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+                    print(f"✓ PC: director → 3-D mode, downscaled image")
             ray.fov              += (director.ray_fov - ray.fov) * 0.1
 
         sim_step_count = 0
@@ -535,18 +545,16 @@ async def main():
 
         # Raytrace
         if ray_shape == 0:
-            frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
-            #frame = ray.quad(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r)
+            frame = ray.triangle(sim.xyz, sim.rgb, sim.next_x, sim.next_y)
         elif ray_shape == 1:
-            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
+            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 5.0 * sim.r)
         elif ray_shape == 2:
-            #frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
-            #frame = ray.triangle(sim.xyz, sim.rgb, sim.next_x, sim.next_y)
-            frame = ray.mesh(sim.xyz, sim.rgb, sim.r, sections=12)
+            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 3.0 * sim.r, 3.0 * sim.r, 0.5 * sim.r)  
+            #frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
         elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
+            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
         elif ray_shape == 4:
-            frame = ray.sphere(sim.xyz, sim.rgb, 2.0 * sim.r)
+            frame = ray.sphere(sim.xyz, sim.rgb, 4.0 * sim.r)
         else:
             frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
 
@@ -569,10 +577,6 @@ async def main():
                 director.disable()
             else:
                 director.enable()
-        elif key == ord('r') and not director.enabled:
-            ray_shape += 1
-            if ray_shape >= 5:
-                ray_shape = 0
 
     cv2.destroyAllWindows()
     if cam is not None:

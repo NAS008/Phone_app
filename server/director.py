@@ -164,6 +164,7 @@ class Director:
         self._fov_phase         = "idle"   # idle | zoomed | shape_changed
         self._fov_last_step_t   = 0.0
         self._fov_cycle_last    = -30.0    # first zoom fires at t=30 s
+        self._image_gen_t       = None     # perf_counter when last prompt was sent
 
     # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -197,9 +198,10 @@ class Director:
         t = now - self._t0
         self._rule_mouse(now, t)
         self._rule_fov_zoom(now, t)
-        self._rule_go_back(t)
+        self._rule_go_back(now, t)
         self._rule_constraints(t)
         self._rule_gradient(t)
+        self._rule_ray_shape(now)   # last so it can override fov_zoom during image gen
 
     # ── Prompt loop ──────────────────────────────────────────────────────────────
 
@@ -242,6 +244,8 @@ class Director:
             text=prompt_text,
             turn_id=uuid.uuid4().hex,
         )
+        self._image_gen_t = time.perf_counter()
+        print(f"✓ Director: image generation triggered — flat mode + go_back for 5 s")
 
     # ── Display rules ────────────────────────────────────────────────────────────
 
@@ -295,8 +299,11 @@ class Director:
                 self._fov_phase = "idle"
             return
 
-    def _rule_go_back(self, t: float) -> None:
-        """40 s off, 2 s on, 5 s off, 3 s on."""
+    def _rule_go_back(self, now: float, t: float) -> None:
+        """5 s on when image gen fires; otherwise 40 s off, 2 s on, 5 s off, 3 s on."""
+        if self._image_gen_t is not None and now - self._image_gen_t < 5.0:
+            self.sim_go_back = True
+            return
         PERIOD  = 50.0
         phase_t = t % PERIOD
         if phase_t < 40.0:
@@ -307,6 +314,11 @@ class Director:
             self.sim_go_back = False
         else:
             self.sim_go_back = True
+
+    def _rule_ray_shape(self, now: float) -> None:
+        """Force shape 5 (flat) for 5 s after image generation is triggered."""
+        if self._image_gen_t is not None and now - self._image_gen_t < 5.0:
+            self.ray_shape = 5
 
     def _rule_constraints(self, t: float) -> None:
         """Shape 0 forces mode 2; shape 3 alternates 1/2; others cycle 0-2."""

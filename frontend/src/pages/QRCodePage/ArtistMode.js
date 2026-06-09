@@ -319,7 +319,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientMode, setSettingsGradientMode] = useState(0);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
-  const [settingsAutoPlay, setSettingsAutoPlay] = useState(false);
+  const [settingsAutoPlay, setSettingsAutoPlay] = useState(true);
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const audioInputRef = useRef(null);

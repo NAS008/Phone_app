@@ -15,10 +15,10 @@
 # ✓ Update sim gradients and xyz_goal
 # ✓ OpticalFlow interpolation, update rgb
 # ✓ Simulation update
-# ✗ Add camera interaction
-# ✗ Add mouse interaction
-# ✗ Add audio frequencies interaction
-# ✗ Add FLIP fluid
+# ✓ Add camera interaction
+# ✓ Add mouse interaction
+# ✓ Add audio frequencies interaction
+# ✓ Add FLIP fluid
 # ✗ Add collisions
 # ✓ Add world boundaries
 # ✗ Add slime simulation
@@ -48,6 +48,8 @@ from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera, Mic, Mouse, OneEuro
+from gemini import Gemini
+from director import Director
 ctypes.windll.user32.SetProcessDPIAware()
 
 def get_first_part(parts, kind):
@@ -388,6 +390,12 @@ async def main():
             sim_depth_factor = float(params['depth_factor'])
             print(f"✓ PC: sim depth factor set to {sim_depth_factor:.2f}")
 
+        if 'auto_play' in params:
+            if bool(params['auto_play']):
+                director.enable()
+            else:
+                director.disable()
+
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
@@ -449,6 +457,17 @@ async def main():
     await bus.publish_session(session_id=session.session_id)
     qr_img = session.generate_qr_code()
 
+    # Director
+    gemini_pc = Gemini(
+        GEMINI_API_KEY=config.GEMINI_API_KEY,
+        TEXT_MODEL=config.GEMINI_TEXT_MODEL,
+        IMAGE_MODEL=config.GEMINI_IMAGE_MODEL,
+    )
+    director = Director(bus, gemini_pc, config, ray, sim, lambda: session.session_id)
+    director.ray_fov = config.fov
+    director.start()
+    director.enable()
+
     # Time cadence
     ray_period = 1.0 / config.FPS
     sim_period = 1.0 / config.FPS_SIM
@@ -461,21 +480,34 @@ async def main():
 
         # Keep FPS cadence to save CPU, since it's the bottleneck
         now = time.perf_counter()
+
+        if director.enabled:
+            director.tick(now)
+            sim_go_back_on        = director.sim_go_back
+            sim_constraints_mode  = director.sim_constraints_mode
+            sim_gradient_mode     = director.sim_gradient_mode
+            ray_shape             = director.ray_shape
+            ray.fov              += (director.ray_fov - ray.fov) * 0.1
+
         sim_step_count = 0
         while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
             # UI
-            if cam is not None:
-                if cam.update(now):
-                    sim.inject_mouse(cam.pos, cam.vel)
-            if mouse is not None:
-                if mouse.update(now):
-                    sim.inject_mouse(mouse.pos, mouse.vel)
-            if mic is not None:
-                bands, flux = mic.update()
-                if bands is not None:
-                    sim.inject_audio(bands, flux)
+            if director.enabled:
+                if director.ms_on:
+                    sim.inject_mouse(director.ms_pos, director.ms_vel)
+            else:
+                if cam is not None:
+                    if cam.update(now):
+                        sim.inject_mouse(cam.pos, cam.vel)
+                if mouse is not None:
+                    if mouse.update(now):
+                        sim.inject_mouse(mouse.pos, mouse.vel)
+                if mic is not None:
+                    bands, flux = mic.update()
+                    if bands is not None:
+                        sim.inject_audio(bands, flux)
             # Simulate
-            sim.update(
+            sim.update_flip(
                 go_back_on=sim_go_back_on,
                 constraints_mode=sim_constraints_mode,
                 gradient_mode=sim_gradient_mode
@@ -508,7 +540,9 @@ async def main():
         elif ray_shape == 1:
             frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 8.0 * sim.r)
         elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
+            #frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 4.0 * sim.r, 4.0 * sim.r, 1.0 * sim.r)
+            #frame = ray.triangle(sim.xyz, sim.rgb, sim.next_x, sim.next_y)
+            frame = ray.mesh(sim.xyz, sim.rgb, sim.r, sections=12)
         elif ray_shape == 3:
             frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.4 * sim.r)
         elif ray_shape == 4:
@@ -530,6 +564,15 @@ async def main():
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):
             break
+        elif key == ord('d'):
+            if director.enabled:
+                director.disable()
+            else:
+                director.enable()
+        elif key == ord('r') and not director.enabled:
+            ray_shape += 1
+            if ray_shape >= 5:
+                ray_shape = 0
 
     cv2.destroyAllWindows()
     if cam is not None:

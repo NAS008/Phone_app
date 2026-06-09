@@ -24,9 +24,8 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
-from gemini import Gemini, GeminiImage, GeminiBlockedError
+from gemini import Gemini, GeminiBlockedError
 from sd35 import StableDiffusion, AnimateDiff
-from director import Director
 
 def extract_first_text(parts):
     for part in parts or []:
@@ -79,15 +78,6 @@ async def main():
         STYLE=current_style["long"],
     )
 
-    director = Director(bus, gemini, config)
-    director.bind(lambda: (
-        current_session_id,
-        ai_mode,
-        current_style,
-        last_generated_image_bgr,
-        session_histories.get(str(current_session_id), []),
-    ))
-
     current_session_id = ""
     joined_users = set()
     session_histories = {}
@@ -131,8 +121,6 @@ async def main():
             )
         return _ad
 
-    # ── Event handlers ────────────────────────────────────────────────────────
-
     async def _publish_error(session_id, text, turn_id):
         await bus.publish_ai_message_to_pc(
             session_id=session_id, nickname="NonCarbon Artist",
@@ -147,7 +135,7 @@ async def main():
         nonlocal current_session_id, joined_users, last_generated_image_bgr
         current_session_id = str(session_id or "")
         joined_users.clear()
-        joined_users.add(Director.NICKNAME)   # Director is always a valid sender
+        joined_users.add("Director")   # Director (running on PC) is always a valid sender
         session_histories.clear()
         pending_parts.clear()
         last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
@@ -175,11 +163,6 @@ async def main():
             else:
                 print(f"✗ Server: ignored message from unjoined user '{nickname}'")
                 return
-
-        # A real human message stops the director
-        if nickname != Director.NICKNAME and director.enabled:
-            director.disable()
-            print("✓ Server: auto-play stopped by incoming user message")
 
         effective_session_id = session_id if str(session_id) == config.ADMIN_SESSION_ID else (current_session_id or session_id)
 
@@ -375,12 +358,6 @@ async def main():
                 current_style = style_values[idx]
                 gemini.STYLE = current_style["long"]
                 print(f"✓ Server: style set to '{current_style['name']}'")
-        if "auto_play" in params:
-            if bool(params["auto_play"]):
-                director.enable()
-            else:
-                director.disable()
-
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)
     bus.on(Bus.USER_MESSAGE, on_user_message)
@@ -388,7 +365,6 @@ async def main():
 
     while True:
         await bus.poll()
-
 
 if __name__ == '__main__':
     asyncio.run(main())

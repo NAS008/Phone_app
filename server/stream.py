@@ -67,9 +67,10 @@ class CvVideoTrack(VideoStreamTrack):
         return frame
 
 class StreamingServer:
-    def __init__(self, frame_bus, config, viewer_html, host="0.0.0.0", port=8080):
+    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080):
         self.frame_bus = frame_bus
-        self.config = config
+        self.W = W
+        self.H = H
         self.viewer_html = Path(viewer_html)
         self.host = host
         self.port = port
@@ -93,7 +94,7 @@ class StreamingServer:
 
         track = CvVideoTrack(
             self.frame_bus,
-            fallback_size=(self.config.WINDOW_H, self.config.WINDOW_W),
+            fallback_size=(self.H, self.W),
         )
         pc.addTrack(track)
 

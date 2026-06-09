@@ -12,7 +12,7 @@ class Config:
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
     WINDOW_W, WINDOW_H = 2048, 2048#512, 512#1080, 1080#2160, 2160
-    IMAGE_SIZE = 512
+    IMAGE_SIZE = 1024
     GRID_SIZE = 128
     PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
@@ -24,16 +24,18 @@ class Config:
         GY = GRID_SIZE
     GZ = GRID_SIZE // 4
     G = [GX, GY, GZ]
-    LAYERS = 2
+    LAYERS = 1
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
-    light = [0.4 * GX / max(GX, GY), 0.9 * GY / max(GX, GY), 0.5]    
-    fov = 1.2
+    light = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.6]    
+    fov = 1.0
     samples = 1
     background = [0.0, 0.0, 0.0]
-    ambient = 0.7
+    ambient = 0.6
     shadow = 0.3
     FPS = 12
+    FPS_SIM = FPS * 2
+    MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
 
     # UI
@@ -330,11 +332,9 @@ class Config:
             "long": "SCENE: Transform *MAIN SUBJECTS* in [Image] into persons in center of wealthy merchant group painting, all formally posed in dark interior with dramatic window light, but person is holding a modern selfie stick extended toward viewer. Create a Rembrandt-style Dutch Golden Age group portrait. Chiaroscuro lighting with dark background and illuminated faces. Rich blacks and warm golden highlights. Classical Dutch interior with map on wall. *MAIN SUBJECTS* FACES: Preserve original facial proportions, bone structure, and identity. You may freely modify bodies, poses, clothing, hairstyles, background, and all other elements to fit the scene perfectly. Maintain realistic lighting and shadows that match the scene. Ensure enhancements look natural and photorealistic. ADD ELEMENTS: Add elements from {transcript}. Dress in 17th century Dutch merchant clothing (black doublet with white lace collar, black hat with feather). Add elaborate ruff collar. Add serious, dignified expression typical of Dutch portraits. Add modern smartphone on extended selfie stick held prominently with screen glowing. Add other period-dressed figures arranged formally behind looking confused at device. Add dramatic Rembrandt lighting from window highlighting face and selfie stick.",
         },
     }
+    
     # Director (auto-play)
-    DIRECTOR_PROMPT_INTERVAL = 30    # seconds between AI-generated prompts
-    DIRECTOR_SCENE_INTERVAL  = 120   # seconds between shape-change / pointer sweep
-    DIRECTOR_SPLINE_POINTS   = 6     # random control points for the pointer spline
-    DIRECTOR_SPLINE_SUBSTEPS = 8     # Catmull-Rom interpolation steps per segment
+    DIRECTOR_PROMPT_INTERVAL = 300    # seconds between AI-generated prompts
 
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors

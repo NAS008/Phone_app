@@ -475,10 +475,6 @@ async def main():
     next_ray_tick = now
     next_sim_tick = now
     while True:
-        await bus.poll()
-        await kick_processing()
-
-        # Keep FPS cadence to save CPU, since it's the bottleneck
         now = time.perf_counter()
 
         if director.enabled:
@@ -531,6 +527,9 @@ async def main():
         if now < next_ray_tick:
             await asyncio.sleep(min(next_ray_tick - now, sim_period))
             continue
+        # ── at ray FPS: poll bus and start any pending image processing ──
+        await bus.poll(timeout=0)
+        await kick_processing()
         next_ray_tick += ray_period
         if now > next_ray_tick + ray_period:
             next_ray_tick = now + ray_period

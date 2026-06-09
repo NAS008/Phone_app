@@ -158,8 +158,8 @@ async def main():
             return
 
         if nickname not in joined_users:
-            if str(session_id) == config.ADMIN_SESSION_ID:
-                joined_users.add(nickname)  # auto-rejoin admin if session was reset
+            if str(session_id) == config.ADMIN_SESSION_ID or str(session_id) == str(current_session_id):
+                joined_users.add(nickname)
             else:
                 print(f"✗ Server: ignored message from unjoined user '{nickname}'")
                 return
@@ -236,7 +236,7 @@ async def main():
 
         # ── Modes 0 and 1: Gemini first ──────────────────────────────────────
         try:
-            result = gemini.handle(effective_parts, history=history)
+            result = await loop.run_in_executor(executor, lambda: gemini.handle(effective_parts, history))
         except GeminiBlockedError as e:
             print(f"✗ Server: Gemini blocked ({e.reason}): {e.user_message}")
             await _publish_error(effective_session_id, e.user_message, turn_id)

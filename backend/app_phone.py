@@ -7,11 +7,9 @@
 
 # Phone App uses the phone sensors to bridge interaction with user and NonCarbon Artist
 # Has all the user command messages and settings
-# Input: Receives text or audio and/ or image bytes, receives commands in Admin mode
+# Input: Receives text (or text from audio) and/ or image bytes, receives commands in Admin mode
 # Output: Post messages in the bus with instructions
 # ----------------------------------------------------------------
-# ✓ Complete tests and publish on the web
-# ✓ Test gesture with phone and latency
 
 import asyncio
 import base64

@@ -54,16 +54,18 @@ async def main():
         IMAGE_SIZE=config.IMAGE_SIZE,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
         G=config.G,
-        L=3,
-        smooth=15,
-        dt = 1.0 / config.FPS,
+        L=config.LAYERS,
+        smooth=3,
+        dt = 1.0 / config.FPS_SIM,
     )
     folder = Folder(config.IMAGE_SIZE, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img)
     sim_gradient_on = False
+    sim_gradient_mode = 0
     sim_goback_on = False
-    sim_constraints_on = False
+    sim_constraints_on = True
+    sim_flip_on = True
 
     ray = RayTracer(
         W=config.WINDOW_W,
@@ -78,46 +80,64 @@ async def main():
         ambient=config.ambient,
         shadow=config.shadow,
     )
-    ray_shape = 0
+    ray_shape = 4
 
-    ms = Mouse(1.0 / config.FPS, config.WINDOW_W, config.WINDOW_H)
+    ms = Mouse(1.0 / config.FPS_SIM, config.WINDOW_W, config.WINDOW_H)
 
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
-    cv2.setMouseCallback(config.APP_NAME, ms.mouse_callback)
+    cv2.setMouseCallback(config.APP_NAME, ms.callback)
 
     frame_bus = FrameBus()
     streaming = StreamingServer(
         frame_bus=frame_bus,
-        config=config,
+        W=config.WINDOW_W,
+        H=config.WINDOW_H,
         viewer_html=VIEWER_HTML,
         host="192.168.68.61",
         port=8080,
     )
     runner = await streaming.start()
 
-    frame_dur = 1.0 / config.FPS
-    next_tick = time.perf_counter()
+    ray_period = 1.0 / config.FPS
+    sim_period = 1.0 / config.FPS_SIM
+
+    now = time.perf_counter()
+    next_ray_tick = now
+    next_sim_tick = now
+
+    sim_steps = 0
     try:
         while True:
-
-            # Simulate
-            if sim_gradient_on:
-                sim.inject_gradient()
-
-            if ms.on:
-                sim.inject_mouse(ms.pos, ms.vel)
-            sim.update(constraints_on=sim_constraints_on, go_back_on=sim_goback_on)
-
-            # Keep FPS cadence on raytracing to save CPU, since it's the bottleneck
+            # Run sim at a bounded multiple of ray FPS
             now = time.perf_counter()
-            if now < next_tick:
-                await asyncio.sleep(next_tick - now)
+            sim_step_count = 0
+            while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
+                if sim_gradient_on:
+                    sim.inject_gradient(mode=sim_gradient_mode)
+                if ms.on:
+                    sim.inject_mouse(ms.pos, ms.vel)
+                sim.update(
+                    constraints_on=sim_constraints_on,
+                    constraints_mode=1,
+                    go_back_on=sim_goback_on,
+                    flip_on=sim_flip_on)
+                sim_steps += 1
+                sim_step_count += 1
+                next_sim_tick += sim_period
+            # If we fell too far behind, drop backlog instead of spiraling
+            if now > next_sim_tick + sim_period * config.MAX_SIM_STEPS_PER_LOOP:
+                next_sim_tick = now + sim_period
+
+            # Raytrace only on visual FPS cadence
+            if now < next_ray_tick:
+                await asyncio.sleep(min(next_ray_tick - now, sim_period))
                 continue
-            next_tick += frame_dur
-            if now > next_tick + frame_dur:
-                next_tick = now + frame_dur
+
+            next_ray_tick += ray_period
+            if now > next_ray_tick + ray_period:
+                next_ray_tick = now + ray_period
 
             # Raytrace
             if ray_shape == 0:

@@ -296,7 +296,7 @@ class SuperResolution:
         )
         print(f"✓ [ai] Super resolution model ready | scale: {self.model.scale}x")
 
-    def super_image(self, frame):
+    def upscale(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().div(255.0).unsqueeze(0).cuda()
         with torch.no_grad():

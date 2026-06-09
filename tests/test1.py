@@ -1,4 +1,4 @@
-# Simply text sim and ray code
+# Simply test sim and ray code
 
 import cv2
 import numpy as np
@@ -78,7 +78,7 @@ async def main():
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.resizeWindow(config.APP_NAME, config.WINDOW_W, config.WINDOW_H)
-    cv2.setMouseCallback(config.APP_NAME, ms.mouse_callback)
+    cv2.setMouseCallback(config.APP_NAME, ms.callback)
 
     frame_dur = 1.0 / config.FPS
     next_tick = time.perf_counter()

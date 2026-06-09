@@ -55,6 +55,38 @@ def k_fill(
                 offset = wp.atomic_add(cell_offset, cell, 1)
                 particle_ids[start + offset] = tid
 
+@wp.kernel
+def k_insert_pixel(
+    xyz: wp.array(dtype=wp.vec3), r: float,
+    h: float, G: wp.vec3i, cell_count: wp.array(dtype=int)
+):
+    tid = wp.tid()
+    p = xyz[tid]
+    cell_min = world_to_grid(wp.vec3(p.x - r, p.y - r, p.z), h, G)
+    cell_max = world_to_grid(wp.vec3(p.x + r, p.y + r, p.z), h, G)
+    z = cell_min.z
+    for y in range(cell_min.y, cell_max.y + 1):
+        for x in range(cell_min.x, cell_max.x + 1):
+            cell = flat_cell(x, y, z, G)
+            wp.atomic_add(cell_count, cell, 1)
+
+@wp.kernel
+def k_fill_pixel(
+    xyz: wp.array(dtype=wp.vec3), r: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), particle_ids: wp.array(dtype=int), cell_offset: wp.array(dtype=int)
+):
+    tid = wp.tid()     
+    p = xyz[tid]    
+    cell_min = world_to_grid(wp.vec3(p.x - r, p.y - r, p.z), h, G)
+    cell_max = world_to_grid(wp.vec3(p.x + r, p.y + r, p.z), h, G)
+    z = cell_min.z
+    for y in range(cell_min.y, cell_max.y + 1):
+        for x in range(cell_min.x, cell_max.x + 1):
+            cell = flat_cell(x, y, z, G)
+            start = cell_start[cell]
+            offset = wp.atomic_add(cell_offset, cell, 1)
+            particle_ids[start + offset] = tid
+
 @wp.func
 def mat_to_aabb(
     rx: float, ry: float, rz: float,
@@ -167,6 +199,82 @@ def k_fill_line(
     )    
     cell_min = world_to_grid(line_min, h, G)
     cell_max = world_to_grid(line_max, h, G)
+    for z in range(cell_min.z, cell_max.z + 1):
+        for y in range(cell_min.y, cell_max.y + 1):
+            for x in range(cell_min.x, cell_max.x + 1):
+                cell = flat_cell(x, y, z, G)
+                start = cell_start[cell]
+                offset = wp.atomic_add(cell_offset, cell, 1)
+                particle_ids[start + offset] = tid
+
+@wp.kernel
+def k_insert_triangle(
+    xyz: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
+    h: float, G: wp.vec3i, cell_count: wp.array(dtype=int)
+):
+    tid = wp.tid()    
+    bh = next_x[tid]
+    bv = next_y[tid]
+    if bh < 0 or bv < 0:
+        return    
+    bd = next_y[bh]
+    
+    p0 = xyz[tid]    
+    p1 = xyz[bh]
+    p2 = xyz[bd]
+    p3 = xyz[bv]
+
+    # Compute bounding box for triangle
+    tri_min = wp.vec3(
+        wp.min(p0.x, wp.min(p1.x, wp.min(p2.x, p3.x))),
+        wp.min(p0.y, wp.min(p1.y, wp.min(p2.y, p3.y))),
+        wp.min(p0.z, wp.min(p1.z, wp.min(p2.z, p3.z)))
+    )
+    tri_max = wp.vec3(
+        wp.max(p0.x, wp.max(p1.x, wp.max(p2.x, p3.x))),
+        wp.max(p0.y, wp.max(p1.y, wp.max(p2.y, p3.y))),
+        wp.max(p0.z, wp.max(p1.z, wp.max(p2.z, p3.z)))
+    )
+    
+    cell_min = world_to_grid(tri_min, h, G)
+    cell_max = world_to_grid(tri_max, h, G)
+    for z in range(cell_min.z, cell_max.z + 1):
+        for y in range(cell_min.y, cell_max.y + 1):
+            for x in range(cell_min.x, cell_max.x + 1):
+                cell = flat_cell(x, y, z, G)
+                wp.atomic_add(cell_count, cell, 1)
+
+@wp.kernel
+def k_fill_triangle(
+    xyz: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), particle_ids: wp.array(dtype=int), cell_offset: wp.array(dtype=int)
+):
+    tid = wp.tid()    
+    bh = next_x[tid]
+    bv = next_y[tid]
+    if bh < 0 or bv < 0:
+        return    
+    bd = next_y[bh]
+    
+    p0 = xyz[tid]    
+    p1 = xyz[bh]
+    p2 = xyz[bd]
+    p3 = xyz[bv]
+
+    # Compute bounding box for triangle
+    tri_min = wp.vec3(
+        wp.min(p0.x, wp.min(p1.x, wp.min(p2.x, p3.x))),
+        wp.min(p0.y, wp.min(p1.y, wp.min(p2.y, p3.y))),
+        wp.min(p0.z, wp.min(p1.z, wp.min(p2.z, p3.z)))
+    )
+    tri_max = wp.vec3(
+        wp.max(p0.x, wp.max(p1.x, wp.max(p2.x, p3.x))),
+        wp.max(p0.y, wp.max(p1.y, wp.max(p2.y, p3.y))),
+        wp.max(p0.z, wp.max(p1.z, wp.max(p2.z, p3.z)))
+    )
+    
+    cell_min = world_to_grid(tri_min, h, G)
+    cell_max = world_to_grid(tri_max, h, G)
     for z in range(cell_min.z, cell_max.z + 1):
         for y in range(cell_min.y, cell_max.y + 1):
             for x in range(cell_min.x, cell_max.x + 1):
@@ -411,12 +519,13 @@ def raytrace_sphere(
                 # SHAPE LINE 3
                 if shadow_sphere(
                     xyz, r,
-                    hit_pt + normal * h * 0.01, light_dir, wp.length(light - hit_pt),
+                    hit_pt + normal * r * 0.1, light_dir, wp.length(light - hit_pt),
                     h, G, cell_start, cell_count, particle_ids
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
 
         accum_r += pixel[0]
         accum_g += pixel[1]
@@ -442,6 +551,210 @@ def dir_to_mat(dir: wp.vec3) -> wp.mat33:
         right[1], up[1], fwd[1],
         right[2], up[2], fwd[2]
     )
+
+# Pixel
+@wp.func
+def intersect_pixel(
+    ro: wp.vec3, rd: wp.vec3,
+    center: wp.vec3,
+    rx: float
+) -> float:
+    if wp.abs(rd.z) < 1e-6:
+        return -1.0
+
+    t = (center.z - ro.z) / rd.z
+    if t < 0.001:
+        return -1.0
+
+    hit = ro + rd * t
+    eps = rx * 0.001
+
+    if hit.x < center.x - rx - eps or hit.x > center.x + rx + eps:
+        return -1.0
+    if hit.y < center.y - rx - eps or hit.y > center.y + rx + eps:
+        return -1.0
+
+    return t
+
+@wp.func
+def shadow_pixel(
+    xyz: wp.array(dtype=wp.vec3), r: float,
+    ray_origin: wp.vec3, ray_dir: wp.vec3, shadow_distance: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int)
+) -> bool:
+    inv_dir = wp.vec3(
+        1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+        1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+        1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+    )
+    current_cell = world_to_grid(ray_origin, h, G)
+    if ray_origin[0] < 0.0 or ray_origin[0] > float(G.x)*h or \
+       ray_origin[1] < 0.0 or ray_origin[1] > float(G.y)*h or \
+       ray_origin[2] < 0.0 or ray_origin[2] > float(G.z)*h:
+        return False
+
+    step_x = 1 if ray_dir[0] > 0.0 else -1
+    step_y = 1 if ray_dir[1] > 0.0 else -1
+    step_z = 1 if ray_dir[2] > 0.0 else -1
+    tmax_x = ((float(current_cell[0]) + (1.0 if ray_dir[0]>0.0 else 0.0))*h - ray_origin[0]) * inv_dir[0]
+    tmax_y = ((float(current_cell[1]) + (1.0 if ray_dir[1]>0.0 else 0.0))*h - ray_origin[1]) * inv_dir[1]
+    tmax_z = ((float(current_cell[2]) + (1.0 if ray_dir[2]>0.0 else 0.0))*h - ray_origin[2]) * inv_dir[2]
+    tdelta_x = h * wp.abs(inv_dir[0])
+    tdelta_y = h * wp.abs(inv_dir[1])
+    tdelta_z = h * wp.abs(inv_dir[2])
+
+    for step in range(G.x + G.y + G.z):
+        if current_cell[0]<0 or current_cell[0]>=G.x or current_cell[1]<0 or current_cell[1]>=G.y or current_cell[2]<0 or current_cell[2]>=G.z:
+            break
+        cell_id   = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+        start_idx = cell_start[cell_id]
+        count     = cell_count[cell_id]
+        for i in range(count):
+            pid = particle_ids[start_idx + i]
+            t = intersect_pixel(ray_origin, ray_dir, xyz[pid], r)
+            if t > 0.001 and t < shadow_distance:
+                return True
+        if tmax_x < tmax_y:
+            if tmax_x < tmax_z:
+                if tmax_x > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0]+step_x, current_cell[1], current_cell[2]); tmax_x += tdelta_x
+            else:
+                if tmax_z > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z += tdelta_z
+        else:
+            if tmax_y < tmax_z:
+                if tmax_y > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1]+step_y, current_cell[2]); tmax_y += tdelta_y
+            else:
+                if tmax_z > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z += tdelta_z
+    return False
+
+@wp.kernel
+def raytrace_pixel(
+    xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), r: float,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
+    camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
+):
+    x, y = wp.tid()
+    aspect = float(W) / float(H)
+    accum_r = float(0.0); accum_g = float(0.0); accum_b = float(0.0)
+    seed    = x + y * W
+
+    for s in range(samples):
+        pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
+        jx = float(0.0)
+        jy = float(0.0)
+
+        if samples > 1:
+            rng = wp.rand_init(seed, s)
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+
+        if aspect >= 1.0:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
+        else:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
+        ray_origin = camera
+
+        inv_dir = wp.vec3(
+            1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+            1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+            1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+        )
+
+        current_cell = world_to_grid(ray_origin, h, G)
+        if ray_origin[0]<0.0 or ray_origin[0]>float(G.x)*h or ray_origin[1]<0.0 or ray_origin[1]>float(G.y)*h or ray_origin[2]<0.0 or ray_origin[2]>float(G.z)*h:
+            t_min = float(-1e10); t_max = float(1e10)
+            t1=(0.0-ray_origin[0])*inv_dir[0]; t2=(float(G.x)*h-ray_origin[0])*inv_dir[0]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            t1=(0.0-ray_origin[1])*inv_dir[1]; t2=(float(G.y)*h-ray_origin[1])*inv_dir[1]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            t1=(0.0-ray_origin[2])*inv_dir[2]; t2=(float(G.z)*h-ray_origin[2])*inv_dir[2]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            if t_min > t_max or t_max < 0.0:
+                img[y,x,0]=wp.uint8(0); img[y,x,1]=wp.uint8(0); img[y,x,2]=wp.uint8(0)
+                return
+            entry = ray_origin + ray_dir * (wp.max(0.0, t_min) + 0.0001)
+            current_cell = world_to_grid(entry, h, G)
+
+        step_x = 1 if ray_dir[0]>0.0 else -1
+        step_y = 1 if ray_dir[1]>0.0 else -1
+        step_z = 1 if ray_dir[2]>0.0 else -1
+        tmax_x = ((float(current_cell[0])+(1.0 if ray_dir[0]>0.0 else 0.0))*h - ray_origin[0])*inv_dir[0]
+        tmax_y = ((float(current_cell[1])+(1.0 if ray_dir[1]>0.0 else 0.0))*h - ray_origin[1])*inv_dir[1]
+        tmax_z = ((float(current_cell[2])+(1.0 if ray_dir[2]>0.0 else 0.0))*h - ray_origin[2])*inv_dir[2]
+        tdelta_x = h*wp.abs(inv_dir[0])
+        tdelta_y = h*wp.abs(inv_dir[1])
+        tdelta_z = h*wp.abs(inv_dir[2])
+
+        closest_t = float(1e10); hit_id = int(-1)
+
+        for step in range(G.x + G.y + G.z):
+            if current_cell[0]<0 or current_cell[0]>=G.x or \
+            current_cell[1]<0 or current_cell[1]>=G.y or \
+            current_cell[2]<0 or current_cell[2]>=G.z:
+                break
+            cell_id   = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+            start_idx = cell_start[cell_id]
+            count = cell_count[cell_id]
+            for i in range(count):
+                pid = particle_ids[start_idx + i]
+                t = intersect_pixel(ray_origin, ray_dir, xyz[pid], r)
+                if t > 0.001 and t < closest_t:
+                    closest_t = t; hit_id = pid
+            if hit_id >= 0 and closest_t < wp.min(tmax_x, wp.min(tmax_y, tmax_z)):
+                break
+            if tmax_x < tmax_y:
+                if tmax_x < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0]+step_x, current_cell[1], current_cell[2]); tmax_x+=tdelta_x
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z+=tdelta_z
+            else:
+                if tmax_y < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1]+step_y, current_cell[2]); tmax_y+=tdelta_y
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z+=tdelta_z
+
+        if hit_id >= 0:
+            hit_pt = ray_origin + ray_dir * closest_t
+            normal = wp.vec3(0.0, 0.0, 1.0)
+
+            # flip if facing away from camera — keeps shading consistent
+            if wp.dot(normal, ray_dir) > 0.0:
+                normal = -normal
+
+            light_dir = wp.normalize(light - hit_pt)
+            diffuse   = 0.6 * wp.pow(wp.max(0.0, wp.dot(normal, light_dir)), 4.0)
+            shadow_factor = float(1.0)
+            if diffuse > 0.0:
+                if shadow_pixel(
+                    xyz, r,
+                    hit_pt + normal * r * 0.1, light_dir, wp.length(light - hit_pt),
+                    h, G, cell_start, cell_count, particle_ids
+                ):
+                    shadow_factor = shadow
+
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
+
+        accum_r += pixel[0]; accum_g += pixel[1]; accum_b += pixel[2]
+
+    inv_n = 1.0 / float(samples)
+    img[y, x, 0] = wp.uint8(wp.clamp(accum_b * inv_n, 0.0, 255.0))
+    img[y, x, 1] = wp.uint8(wp.clamp(accum_g * inv_n, 0.0, 255.0))
+    img[y, x, 2] = wp.uint8(wp.clamp(accum_r * inv_n, 0.0, 255.0))
 
 # Oriented quad
 @wp.func
@@ -644,12 +957,13 @@ def raytrace_quad(
             if diffuse > 0.0:
                 if shadow_quad(
                     xyz, rot, r,
-                    hit_pt + normal * h * 0.01, light_dir, wp.length(light - hit_pt),
+                    hit_pt + normal * r * 0.1, light_dir, wp.length(light - hit_pt),
                     h, G, cell_start, cell_count, particle_ids
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
 
         accum_r += pixel[0]; accum_g += pixel[1]; accum_b += pixel[2]
 
@@ -889,7 +1203,7 @@ def raytrace_ellipsoid(
             if diffuse > 0.0:
 
                 # SHAPE LINE 4
-                shadow_origin = hit_pt + normal * wp.max(rx, wp.max(ry, rz)) * 0.005
+                shadow_origin = hit_pt + normal * rx * 0.1#wp.max(rx, wp.max(ry, rz)) * 0.005
                 if shadow_ellipsoid(
                     xyz, rot, rx, ry, rz,
                     shadow_origin, light_dir, wp.length(light - hit_pt),
@@ -897,7 +1211,8 @@ def raytrace_ellipsoid(
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
 
         accum_r += pixel[0]
         accum_g += pixel[1]
@@ -1138,7 +1453,7 @@ def raytrace_prism(
                 light_dist    = wp.length(light - hit_pt)
                 
                 # SHAPE LINE 3 (shadow func name)
-                shadow_origin = hit_pt + normal * wp.max(rx, wp.max(ry, rz)) * 0.005
+                shadow_origin = hit_pt + normal * rx * 0.1#wp.max(rx, wp.max(ry, rz)) * 0.005
                 if shadow_prism(
                     xyz, rot, rx, ry, rz,
                     shadow_origin, light_dir, light_dist,
@@ -1146,7 +1461,8 @@ def raytrace_prism(
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
 
         accum_r += pixel[0]; accum_g += pixel[1]; accum_b += pixel[2]
 
@@ -1483,7 +1799,7 @@ def raytrace_cylinder(
             if diffuse > 0.0:
 
                 # SHAPE LINE 3
-                shadow_origin = hit_pt + normal * r * 0.005
+                shadow_origin = hit_pt + normal * r * 0.1
                 if shadow_cylinder(
                     xyz, next, r,
                     shadow_origin, light_dir, wp.length(light - hit_pt),
@@ -1491,7 +1807,8 @@ def raytrace_cylinder(
                 ):
                     shadow_factor = shadow
 
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
 
         accum_r += pixel[0]
         accum_g += pixel[1]
@@ -1501,6 +1818,678 @@ def raytrace_cylinder(
     img[y, x, 0] = wp.uint8(wp.clamp(accum_b * inv_n, 0.0, 255.0))
     img[y, x, 1] = wp.uint8(wp.clamp(accum_g * inv_n, 0.0, 255.0))
     img[y, x, 2] = wp.uint8(wp.clamp(accum_r * inv_n, 0.0, 255.0))
+
+# Triangle
+@wp.func
+def intersect_triangle(
+    ray_origin: wp.vec3, ray_dir: wp.vec3,
+    v0: wp.vec3, v1: wp.vec3, v2: wp.vec3
+) -> float:
+    epsilon = 1e-8  # Relaxed epsilon
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+    h = wp.cross(ray_dir, edge2)
+    a = wp.dot(edge1, h)
+    
+    # Check for parallel ray (but allow backfaces)
+    if wp.abs(a) < epsilon:
+        return -1.0
+    
+    f = 1.0 / a
+    s = ray_origin - v0
+    u = f * wp.dot(s, h)
+    
+    if u < 0.0 or u > 1.0:
+        return -1.0
+    
+    q = wp.cross(s, edge1)
+    v = f * wp.dot(ray_dir, q)
+    
+    if v < 0.0 or u + v > 1.0:
+        return -1.0
+    
+    t = f * wp.dot(edge2, q)
+    
+    # Accept hits in front of ray origin regardless of face orientation
+    if t > epsilon:
+        return t
+    
+    return -1.0
+
+@wp.func
+def triangle_normal(
+    hit_point: wp.vec3,
+    p0: wp.vec3,
+    p1: wp.vec3,
+    p2: wp.vec3
+) -> wp.vec3:
+    v1 = p1 - p0
+    v2 = p2 - p0
+    return wp.normalize(wp.cross(v1, v2))
+
+@wp.func
+def shadow_triangle(
+    xyz: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
+    ray_origin: wp.vec3, ray_dir: wp.vec3, shadow_distance: float,
+    h: float, G: wp.vec3i,
+    cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int)
+) -> bool:
+    inv_dir = wp.vec3(
+        1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+        1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+        1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+    )
+    current_cell = world_to_grid(ray_origin, h, G)
+    if ray_origin[0] < 0.0 or ray_origin[0] > float(G.x)*h or \
+       ray_origin[1] < 0.0 or ray_origin[1] > float(G.y)*h or \
+       ray_origin[2] < 0.0 or ray_origin[2] > float(G.z)*h:
+        return False
+
+    step_x = 1 if ray_dir[0] > 0.0 else -1
+    step_y = 1 if ray_dir[1] > 0.0 else -1
+    step_z = 1 if ray_dir[2] > 0.0 else -1
+
+    tmax_x = ((float(current_cell[0]) + (1.0 if ray_dir[0]>0.0 else 0.0))*h - ray_origin[0]) * inv_dir[0]
+    tmax_y = ((float(current_cell[1]) + (1.0 if ray_dir[1]>0.0 else 0.0))*h - ray_origin[1]) * inv_dir[1]
+    tmax_z = ((float(current_cell[2]) + (1.0 if ray_dir[2]>0.0 else 0.0))*h - ray_origin[2]) * inv_dir[2]
+    tdelta_x = h * wp.abs(inv_dir[0])
+    tdelta_y = h * wp.abs(inv_dir[1])
+    tdelta_z = h * wp.abs(inv_dir[2])
+
+    for step in range(G.x + G.y + G.z):
+        if current_cell[0]<0 or current_cell[0]>=G.x or \
+           current_cell[1]<0 or current_cell[1]>=G.y or \
+           current_cell[2]<0 or current_cell[2]>=G.z:
+            break
+        cell_id   = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+        start_idx = cell_start[cell_id]
+        count     = cell_count[cell_id]
+
+        t0 = float(-1.0)
+        t1 = float(-1.0)
+        for i in range(count):
+            pid = particle_ids[start_idx + i]
+            
+            # SHAPE LINE 1
+            bh = next_x[pid]  
+            bv = next_y[pid]
+            if bh < 0 or bv < 0:
+                continue
+            bd = next_y[bh]
+            
+            p0 = xyz[pid]
+            p1 = xyz[bh]
+            p2 = xyz[bd]
+            p3 = xyz[bv]
+            
+            t0 = intersect_triangle(ray_origin, ray_dir, p0, p1, p2)                      
+            t1 = intersect_triangle(ray_origin, ray_dir, p0, p2, p3) 
+           
+            if (t0 > 0.001 and t0 < shadow_distance) or (t1 > 0.001 and t1 < shadow_distance):
+                return True
+            
+        if tmax_x < tmax_y:
+            if tmax_x < tmax_z:
+                if tmax_x > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0]+step_x, current_cell[1], current_cell[2])
+                tmax_x += tdelta_x
+            else:
+                if tmax_z > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z)
+                tmax_z += tdelta_z
+        else:
+            if tmax_y < tmax_z:
+                if tmax_y > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1]+step_y, current_cell[2])
+                tmax_y += tdelta_y
+            else:
+                if tmax_z > shadow_distance: break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z)
+                tmax_z += tdelta_z
+    return False
+
+@wp.kernel
+def raytrace_triangle(
+    xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
+    camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
+):
+    x, y = wp.tid()
+    aspect  = float(W) / float(H)
+    accum_r = float(0.0); accum_g = float(0.0); accum_b = float(0.0)
+    seed    = x + y * W
+
+    for s in range(samples):
+        pixel = background
+
+        # Compute grid cell (row, col) for this sample
+        si = s % sqrtN   # column index
+        sj = s / sqrtN   # row index (integer division)
+
+        jx = float(0.0)
+        jy = float(0.0)
+
+        if samples > 1:
+            rng = wp.rand_init(seed, s)
+            # Stratified jitter: cell center offset + rand[0,1]/2 within cell
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+
+        if aspect >= 1.0:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
+        else:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
+        ray_origin = camera
+
+        inv_dir = wp.vec3(
+            1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+            1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+            1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+        )
+
+        if ray_origin[0]<0.0 or ray_origin[0]>float(G.x)*h or \
+           ray_origin[1]<0.0 or ray_origin[1]>float(G.y)*h or \
+           ray_origin[2]<0.0 or ray_origin[2]>float(G.z)*h:
+            t_min = float(-1e10); t_max = float(1e10)
+            t1=(0.0-ray_origin[0])*inv_dir[0]; t2=(float(G.x)*h-ray_origin[0])*inv_dir[0]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            t1=(0.0-ray_origin[1])*inv_dir[1]; t2=(float(G.y)*h-ray_origin[1])*inv_dir[1]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            t1=(0.0-ray_origin[2])*inv_dir[2]; t2=(float(G.z)*h-ray_origin[2])*inv_dir[2]
+            t_min=wp.max(t_min,wp.min(t1,t2));  t_max=wp.min(t_max,wp.max(t1,t2))
+            if t_min > t_max or t_max < 0.0:
+                continue
+            entry  = ray_origin + ray_dir * (wp.max(0.0, t_min) + 0.0001)
+            current_cell = world_to_grid(entry, h, G)
+
+        step_x = 1 if ray_dir[0]>0.0 else -1
+        step_y = 1 if ray_dir[1]>0.0 else -1
+        step_z = 1 if ray_dir[2]>0.0 else -1
+        tmax_x = ((float(current_cell[0])+(1.0 if ray_dir[0]>0.0 else 0.0))*h - ray_origin[0])*inv_dir[0]
+        tmax_y = ((float(current_cell[1])+(1.0 if ray_dir[1]>0.0 else 0.0))*h - ray_origin[1])*inv_dir[1]
+        tmax_z = ((float(current_cell[2])+(1.0 if ray_dir[2]>0.0 else 0.0))*h - ray_origin[2])*inv_dir[2]
+        tdelta_x = h*wp.abs(inv_dir[0])
+        tdelta_y = h*wp.abs(inv_dir[1])
+        tdelta_z = h*wp.abs(inv_dir[2])
+
+        closest_t = float(1e10)
+        hit_id = int(-1)
+        A = wp.vec3(0.0, 0.0, 0.0)
+        B = wp.vec3(0.0, 0.0, 0.0)
+        C = wp.vec3(0.0, 0.0, 0.0)
+        color = wp.vec3(0.0, 0.0, 0.0)
+        for step in range(G.x + G.y + G.z):
+            if current_cell[0]<0 or current_cell[0]>=G.x or \
+               current_cell[1]<0 or current_cell[1]>=G.y or \
+               current_cell[2]<0 or current_cell[2]>=G.z:
+                break
+            cell_id   = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+            start_idx = cell_start[cell_id]
+            count     = cell_count[cell_id]
+            t = float(-1.0)
+            for i in range(count):
+                pid = particle_ids[start_idx + i]
+
+                # Specific to triangles ---------- 
+                bh = next_x[pid]  
+                bv = next_y[pid]
+                if bh < 0 or bv < 0:
+                    continue
+                bd = next_y[bh]
+                
+                p0 = xyz[pid]
+                p1 = xyz[bh]
+                p2 = xyz[bd]
+                p3 = xyz[bv]
+                
+                t0 = intersect_triangle(ray_origin, ray_dir, p0, p1, p2)                      
+                t1 = intersect_triangle(ray_origin, ray_dir, p0, p2, p3) 
+
+                if t0 > 0.0 and t0 < closest_t:
+                    closest_t = t0
+                    hit_id = pid
+                    A = p0
+                    B = p1
+                    C = p2                    
+                    color = (rgb[pid] + rgb[bh] + rgb[bd]) / 3.0
+                if t1 > 0.0 and t1 < closest_t:
+                    closest_t = t1
+                    hit_id = pid
+                    A = p0
+                    B = p2
+                    C = p3
+                    color = (rgb[pid] + rgb[bd] + rgb[bv]) / 3.0
+                # --------------------------------
+            
+            # Early exit if found hit close enough
+            if hit_id >= 0 and closest_t < wp.min(tmax_x, wp.min(tmax_y, tmax_z)):
+                break
+
+                if t > 0.001 and t < closest_t:
+                    closest_t = t; hit_id = pid
+            if hit_id >= 0 and closest_t < wp.min(tmax_x, wp.min(tmax_y, tmax_z)):
+                break
+            if tmax_x < tmax_y:
+                if tmax_x < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0]+step_x, current_cell[1], current_cell[2]); tmax_x+=tdelta_x
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z+=tdelta_z
+            else:
+                if tmax_y < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1]+step_y, current_cell[2]); tmax_y+=tdelta_y
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2]+step_z); tmax_z+=tdelta_z
+
+        if hit_id >= 0:
+            hit_pt = ray_origin + ray_dir * closest_t
+
+            # SHAPE LINE 2
+            normal = triangle_normal(hit_pt, A, B, C)
+            # Flip normal if facing away from camera
+            if wp.dot(normal, ray_dir) > 0.0:
+                normal = -normal
+
+            light_dir = wp.normalize(light - hit_pt)
+            diffuse   = wp.max(0.0, wp.dot(normal, light_dir))
+            shadow_factor = float(1.0)
+            if diffuse > 0.0:
+
+                # SHAPE LINE 3
+                shadow_origin = hit_pt + normal * h * 0.01
+                if shadow_triangle(
+                    xyz, next_x, next_y,
+                    shadow_origin, light_dir, wp.length(light - hit_pt),
+                    h, G, cell_start, cell_count, particle_ids
+                ):
+                    shadow_factor = shadow
+
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = color * (ambient + diffuse * shadow_factor) * depth
+
+        accum_r += pixel[0]
+        accum_g += pixel[1]
+        accum_b += pixel[2]
+
+    inv_n = 1.0 / float(samples)
+    img[y, x, 0] = wp.uint8(wp.clamp(accum_b * inv_n, 0.0, 255.0))
+    img[y, x, 1] = wp.uint8(wp.clamp(accum_g * inv_n, 0.0, 255.0))
+    img[y, x, 2] = wp.uint8(wp.clamp(accum_r * inv_n, 0.0, 255.0))
+
+# Mesh
+@wp.func
+def shadow_mesh(
+    xyz: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3),
+    mesh_verts: wp.array(dtype=wp.vec3), mesh_norms: wp.array(dtype=wp.vec3), mesh_tris: wp.array(dtype=int), mesh_tri_count: int,
+    ray_origin: wp.vec3, ray_dir: wp.vec3, shadow_distance: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int)
+) -> bool:
+    inv_dir = wp.vec3(
+        1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+        1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+        1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+    )
+
+    current_cell = world_to_grid(ray_origin, h, G)
+
+    if ray_origin[0] < 0.0 or ray_origin[0] > float(G.x)*h or \
+       ray_origin[1] < 0.0 or ray_origin[1] > float(G.y)*h or \
+       ray_origin[2] < 0.0 or ray_origin[2] > float(G.z)*h:
+        return False
+
+    step_x = 1 if ray_dir[0] > 0.0 else -1
+    step_y = 1 if ray_dir[1] > 0.0 else -1
+    step_z = 1 if ray_dir[2] > 0.0 else -1
+
+    tmax_x = ((float(current_cell[0]) + (1.0 if ray_dir[0] > 0.0 else 0.0))*h - ray_origin[0]) * inv_dir[0]
+    tmax_y = ((float(current_cell[1]) + (1.0 if ray_dir[1] > 0.0 else 0.0))*h - ray_origin[1]) * inv_dir[1]
+    tmax_z = ((float(current_cell[2]) + (1.0 if ray_dir[2] > 0.0 else 0.0))*h - ray_origin[2]) * inv_dir[2]
+
+    tdelta_x = h * wp.abs(inv_dir[0])
+    tdelta_y = h * wp.abs(inv_dir[1])
+    tdelta_z = h * wp.abs(inv_dir[2])
+
+    for step in range(G.x + G.y + G.z):
+        if current_cell[0] < 0 or current_cell[0] >= G.x or \
+           current_cell[1] < 0 or current_cell[1] >= G.y or \
+           current_cell[2] < 0 or current_cell[2] >= G.z:
+            break
+
+        cell_id = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+        start_idx = cell_start[cell_id]
+        count = cell_count[cell_id]
+
+        for i in range(count):
+            pid = particle_ids[start_idx + i]
+            center = xyz[pid]
+            mat = dir_to_mat(rot[pid])
+
+            for tri in range(mesh_tri_count):
+                i0 = mesh_tris[tri*3 + 0]
+                i1 = mesh_tris[tri*3 + 1]
+                i2 = mesh_tris[tri*3 + 2]
+
+                p0 = center + mat * mesh_verts[i0]
+                p1 = center + mat * mesh_verts[i1]
+                p2 = center + mat * mesh_verts[i2]
+
+                t = intersect_triangle(ray_origin, ray_dir, p0, p1, p2)
+                if t > 0.001 and t < shadow_distance:
+                    return True
+
+        if tmax_x < tmax_y:
+            if tmax_x < tmax_z:
+                if tmax_x > shadow_distance:
+                    break
+                current_cell = wp.vec3i(current_cell[0] + step_x, current_cell[1], current_cell[2])
+                tmax_x += tdelta_x
+            else:
+                if tmax_z > shadow_distance:
+                    break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2] + step_z)
+                tmax_z += tdelta_z
+        else:
+            if tmax_y < tmax_z:
+                if tmax_y > shadow_distance:
+                    break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1] + step_y, current_cell[2])
+                tmax_y += tdelta_y
+            else:
+                if tmax_z > shadow_distance:
+                    break
+                current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2] + step_z)
+                tmax_z += tdelta_z
+
+    return False
+
+@wp.kernel
+def raytrace_mesh(
+    xyz: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3),
+    mesh_verts: wp.array(dtype=wp.vec3), mesh_norms: wp.array(dtype=wp.vec3), mesh_tris: wp.array(dtype=int), mesh_tri_count: int,
+    img: wp.array(dtype=wp.uint8, ndim=3), W: int, H: int, samples: int, sqrtN: int, background: wp.vec3, ambient: float, shadow: float,
+    h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), cell_count: wp.array(dtype=int), particle_ids: wp.array(dtype=int),
+    camera: wp.vec3, fwd: wp.vec3, right: wp.vec3, up: wp.vec3, light: wp.vec3, fov: float
+):
+    x, y = wp.tid()
+    aspect = float(W) / float(H)
+    accum_r = float(0.0)
+    accum_g = float(0.0)
+    accum_b = float(0.0)
+    seed = x + y * W
+
+    for s in range(samples):
+        pixel = background
+
+        si = s % sqrtN
+        sj = s / sqrtN
+
+        jx = float(0.0)
+        jy = float(0.0)
+
+        if samples > 1:
+            rng = wp.rand_init(seed, s)
+            jx = (float(si) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+            jy = (float(sj) + wp.randf(rng) * 0.5) / float(sqrtN) - 0.5
+
+        if aspect >= 1.0:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov / aspect
+        else:
+            u = ((float(x) + 0.5 + jx) / float(W) - 0.5) * fov * aspect
+            v = -((float(y) + 0.5 + jy) / float(H) - 0.5) * fov
+
+        ray_dir = wp.normalize(fwd + right * u + up * v)
+        ray_origin = camera
+
+        inv_dir = wp.vec3(
+            1.0/ray_dir[0] if wp.abs(ray_dir[0]) > 1e-6 else 1e10,
+            1.0/ray_dir[1] if wp.abs(ray_dir[1]) > 1e-6 else 1e10,
+            1.0/ray_dir[2] if wp.abs(ray_dir[2]) > 1e-6 else 1e10
+        )
+
+        if ray_origin[0] < 0.0 or ray_origin[0] > float(G.x)*h or \
+           ray_origin[1] < 0.0 or ray_origin[1] > float(G.y)*h or \
+           ray_origin[2] < 0.0 or ray_origin[2] > float(G.z)*h:
+            tmin = float(-1e10)
+            tmax = float(1e10)
+
+            t1 = (0.0 - ray_origin[0]) * inv_dir[0]
+            t2 = (float(G.x)*h - ray_origin[0]) * inv_dir[0]
+            tmin = wp.max(tmin, wp.min(t1, t2))
+            tmax = wp.min(tmax, wp.max(t1, t2))
+
+            t1 = (0.0 - ray_origin[1]) * inv_dir[1]
+            t2 = (float(G.y)*h - ray_origin[1]) * inv_dir[1]
+            tmin = wp.max(tmin, wp.min(t1, t2))
+            tmax = wp.min(tmax, wp.max(t1, t2))
+
+            t1 = (0.0 - ray_origin[2]) * inv_dir[2]
+            t2 = (float(G.z)*h - ray_origin[2]) * inv_dir[2]
+            tmin = wp.max(tmin, wp.min(t1, t2))
+            tmax = wp.min(tmax, wp.max(t1, t2))
+
+            if tmin > tmax or tmax < 0.0:
+                continue
+
+            entry = ray_origin + ray_dir * (wp.max(0.0, tmin) + 0.0001)
+            current_cell = world_to_grid(entry, h, G)
+        else:
+            current_cell = world_to_grid(ray_origin, h, G)
+
+        step_x = 1 if ray_dir[0] > 0.0 else -1
+        step_y = 1 if ray_dir[1] > 0.0 else -1
+        step_z = 1 if ray_dir[2] > 0.0 else -1
+
+        tmax_x = ((float(current_cell[0]) + (1.0 if ray_dir[0] > 0.0 else 0.0))*h - ray_origin[0]) * inv_dir[0]
+        tmax_y = ((float(current_cell[1]) + (1.0 if ray_dir[1] > 0.0 else 0.0))*h - ray_origin[1]) * inv_dir[1]
+        tmax_z = ((float(current_cell[2]) + (1.0 if ray_dir[2] > 0.0 else 0.0))*h - ray_origin[2]) * inv_dir[2]
+
+        tdelta_x = h * wp.abs(inv_dir[0])
+        tdelta_y = h * wp.abs(inv_dir[1])
+        tdelta_z = h * wp.abs(inv_dir[2])
+
+        closest_t = float(1e10)
+        hit_id = int(-1)
+        hit_a = wp.vec3(0.0, 0.0, 0.0)
+        hit_b = wp.vec3(0.0, 0.0, 0.0)
+        hit_c = wp.vec3(0.0, 0.0, 0.0)
+        hit_na = wp.vec3(0.0, 0.0, 1.0)
+        hit_nb = wp.vec3(0.0, 0.0, 1.0)
+        hit_nc = wp.vec3(0.0, 0.0, 1.0)
+        hit_mat = wp.mat33(
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        )
+
+        for step in range(G.x + G.y + G.z):
+            if current_cell[0] < 0 or current_cell[0] >= G.x or \
+               current_cell[1] < 0 or current_cell[1] >= G.y or \
+               current_cell[2] < 0 or current_cell[2] >= G.z:
+                break
+
+            cell_id = flat_cell(current_cell[0], current_cell[1], current_cell[2], G)
+            start_idx = cell_start[cell_id]
+            count = cell_count[cell_id]
+
+            for i in range(count):
+                pid = particle_ids[start_idx + i]
+                center = xyz[pid]
+                mat = dir_to_mat(rot[pid])
+
+                for tri in range(mesh_tri_count):
+                    i0 = mesh_tris[tri*3 + 0]
+                    i1 = mesh_tris[tri*3 + 1]
+                    i2 = mesh_tris[tri*3 + 2]
+
+                    p0 = center + mat * mesh_verts[i0]
+                    p1 = center + mat * mesh_verts[i1]
+                    p2 = center + mat * mesh_verts[i2]
+
+                    t = intersect_triangle(ray_origin, ray_dir, p0, p1, p2)
+
+                    if t > 0.001 and t < closest_t:
+                        closest_t = t
+                        hit_id = pid
+                        hit_a = p0
+                        hit_b = p1
+                        hit_c = p2
+                        hit_na = mesh_norms[i0]
+                        hit_nb = mesh_norms[i1]
+                        hit_nc = mesh_norms[i2]
+                        hit_mat = mat
+
+            if hit_id >= 0 and closest_t < wp.min(tmax_x, wp.min(tmax_y, tmax_z)):
+                break
+
+            if tmax_x < tmax_y:
+                if tmax_x < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0] + step_x, current_cell[1], current_cell[2])
+                    tmax_x += tdelta_x
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2] + step_z)
+                    tmax_z += tdelta_z
+            else:
+                if tmax_y < tmax_z:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1] + step_y, current_cell[2])
+                    tmax_y += tdelta_y
+                else:
+                    current_cell = wp.vec3i(current_cell[0], current_cell[1], current_cell[2] + step_z)
+                    tmax_z += tdelta_z
+
+        if hit_id >= 0:
+            hit_pt = ray_origin + ray_dir * closest_t
+
+            e0 = hit_b - hit_a
+            e1 = hit_c - hit_a
+            e2 = hit_pt - hit_a
+
+            d00 = wp.dot(e0, e0)
+            d01 = wp.dot(e0, e1)
+            d11 = wp.dot(e1, e1)
+            d20 = wp.dot(e2, e0)
+            d21 = wp.dot(e2, e1)
+
+            denom = d00 * d11 - d01 * d01
+
+            w0 = 1.0
+            w1 = 0.0
+            w2 = 0.0
+
+            if wp.abs(denom) > 1e-12:
+                w1 = (d11 * d20 - d01 * d21) / denom
+                w2 = (d00 * d21 - d01 * d20) / denom
+                w0 = 1.0 - w1 - w2
+
+            normal_local = wp.normalize(hit_na * w0 + hit_nb * w1 + hit_nc * w2)
+            normal = wp.normalize(hit_mat * normal_local)
+
+            if wp.dot(normal, ray_dir) > 0.0:
+                normal = -normal
+
+            light_dir = wp.normalize(light - hit_pt)
+            diffuse = wp.max(0.0, wp.dot(normal, light_dir))
+            shadow_factor = float(1.0)
+
+            if diffuse > 0.0:
+                shadow_origin = hit_pt + normal * (h * 0.01)
+                if shadow_mesh(
+                    xyz, rot, mesh_verts, mesh_norms, mesh_tris, mesh_tri_count,
+                    shadow_origin, light_dir, wp.length(light - hit_pt),
+                    h, G, cell_start, cell_count, particle_ids
+                ):
+                    shadow_factor = shadow
+
+            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
+
+        accum_r += pixel[0]
+        accum_g += pixel[1]
+        accum_b += pixel[2]
+
+    inv_n = 1.0 / float(samples)
+    img[y, x, 0] = wp.uint8(wp.clamp(accum_b * inv_n, 0.0, 255.0))
+    img[y, x, 1] = wp.uint8(wp.clamp(accum_g * inv_n, 0.0, 255.0))
+    img[y, x, 2] = wp.uint8(wp.clamp(accum_r * inv_n, 0.0, 255.0))
+
+# Geometry constructs
+def make_ellipsoid_mesh(radius=0.1, a=1.0, b=1.0, c=1.0, sections=6, stacks=2):
+    sections = max(3, int(sections))
+    stacks = max(2, int(stacks))
+
+    verts = []
+    norms = []
+    tris = []
+
+    rx = radius * a
+    ry = radius * b
+    rz = radius * c
+
+    def add_vert(x, y, z):
+        verts.append((x, y, z))
+
+        nx = x / (rx * rx)
+        ny = y / (ry * ry)
+        nz = z / (rz * rz)
+        n = np.array([nx, ny, nz], dtype=np.float32)
+        n /= np.linalg.norm(n) + 1e-12
+        norms.append(tuple(n))
+
+    add_vert(0.0, 0.0, rz)
+
+    for stack in range(1, stacks):
+        v = stack / float(stacks)
+        phi = np.pi * v
+
+        sin_phi = np.sin(phi)
+        cos_phi = np.cos(phi)
+
+        z = rz * cos_phi
+
+        for section in range(sections):
+            u = section / float(sections)
+            theta = 2.0 * np.pi * u
+
+            x = rx * sin_phi * np.cos(theta)
+            y = ry * sin_phi * np.sin(theta)
+
+            add_vert(x, y, z)
+
+    bottom_index = len(verts)
+    add_vert(0.0, 0.0, -rz)
+
+    def ring_index(stack, section):
+        return 1 + (stack - 1) * sections + (section % sections)
+
+    for section in range(sections):
+        tris.extend([0, ring_index(1, section), ring_index(1, section + 1)])
+
+    for stack in range(1, stacks - 1):
+        for section in range(sections):
+            a0 = ring_index(stack, section)
+            a1 = ring_index(stack, section + 1)
+            b0 = ring_index(stack + 1, section)
+            b1 = ring_index(stack + 1, section + 1)
+
+            tris.extend([a0, b0, a1])
+            tris.extend([a1, b0, b1])
+
+    for section in range(sections):
+        tris.extend([bottom_index, ring_index(stacks - 1, section + 1), ring_index(stacks - 1, section)])
+
+    mesh_verts_np = np.asarray(verts, dtype=np.float32)
+    mesh_norms_np = np.asarray(norms, dtype=np.float32)
+    mesh_tris_np = np.asarray(tris, dtype=np.int32)
+
+    mesh_verts = wp.array(mesh_verts_np, dtype=wp.vec3, device="cuda")
+    mesh_norms = wp.array(mesh_norms_np, dtype=wp.vec3, device="cuda")
+    mesh_tris = wp.array(mesh_tris_np, dtype=int, device="cuda")
+
+    return mesh_verts, mesh_norms, mesh_tris
 
 class RayTracer:
     def __init__(self, W=1024, H=1024, G=[128, 128, 32], camera=[0.5, 0.5, 1.0], target=[0.5, 0.5, 0.0], light=[0.5, 1.0, 0.5], fov=1.0, samples=1, background=[0.0, 0.0, 0.0], ambient=0.4, shadow=0.4):
@@ -1525,7 +2514,12 @@ class RayTracer:
         self.background = wp.vec3(*background)
         self.ambient = ambient
         self.shadow = shadow
-          
+
+        self.first = True
+        self.mesh_verts = None
+        self.mesh_norms = None
+        self.mesh_tris = None
+         
     def sphere(self, xyz, rgb, r):
         self.grid.build(len(xyz), k_insert, k_fill, [xyz, r], [xyz, r])
         wp.launch(raytrace_sphere, dim=(self.W, self.H), inputs=[
@@ -1536,7 +2530,18 @@ class RayTracer:
         ], device="cuda")
         wp.synchronize()
         return self.img.numpy()
-    
+
+    def pixel(self, xyz, rgb, r):
+        self.grid.build(len(xyz), k_insert_pixel, k_fill_pixel, [xyz, r], [xyz, r])
+        wp.launch(raytrace_pixel, dim=(self.W, self.H), inputs=[
+            xyz, rgb, r,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
+            self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
+            self.camera, self.fwd, self.right, self.up, self.light, self.fov
+        ], device="cuda")
+        wp.synchronize()
+        return self.img.numpy()
+        
     def quad(self, xyz, rgb, rot, r):
         self.grid.build(len(xyz), k_insert_oriented, k_fill_oriented, [xyz, rot, r, r, 0.0], [xyz, rot, r, r, 0.0])
         wp.launch(raytrace_quad, dim=(self.W, self.H), inputs=[
@@ -1578,5 +2583,38 @@ class RayTracer:
             self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
             self.camera, self.fwd, self.right, self.up, self.light, self.fov
         ], device="cuda")
+        wp.synchronize()
+        return self.img.numpy()
+    
+    def triangle(self, xyz, rgb, next_x, next_y):
+        self.grid.build(len(xyz), k_insert_triangle, k_fill_triangle, [xyz, next_x, next_y], [xyz, next_x, next_y])
+        wp.launch(raytrace_triangle, dim=(self.W, self.H), inputs=[
+            xyz, rgb, next_x, next_y,
+            self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
+            self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
+            self.camera, self.fwd, self.right, self.up, self.light, self.fov
+        ], device="cuda")
+        wp.synchronize()
+        return self.img.numpy()
+    
+    def mesh(self, xyz, rgb, rot, r, a=1.0, b=1.0, c=0.3, sections=6, stacks=2):
+        if self.first:
+            self.first = False
+            self.mesh_verts, self.mesh_norms, self.mesh_tris = make_ellipsoid_mesh(radius=r, a=a, b=b, c=c, sections=sections, stacks=stacks)
+
+        self.grid.build(len(xyz), k_insert, k_fill, [xyz, r], [xyz, r])
+        mesh_tri_count = len(self.mesh_tris) // 3
+        wp.launch(
+            raytrace_mesh,
+            dim=(self.W, self.H),
+            inputs=[
+                xyz, rgb, rot,
+                self.mesh_verts, self.mesh_norms, self.mesh_tris, mesh_tri_count,
+                self.img, self.W, self.H, self.samples, self.sqrtN, self.background, self.ambient, self.shadow,
+                self.h, self.G, self.grid.cell_start, self.grid.cell_count, self.grid.particle_ids,
+                self.camera, self.fwd, self.right, self.up, self.light, self.fov
+            ],
+            device="cuda"
+        )
         wp.synchronize()
         return self.img.numpy()

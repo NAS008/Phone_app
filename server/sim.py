@@ -117,7 +117,7 @@ def k_subtract_gradient(
 @wp.kernel
 def k_advect_particles_rk2(
     xyz: wp.array(dtype=wp.vec3),
-    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float),
+    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float), invmass: wp.array(dtype=float),
     dt: float,
     h: float, G: wp.vec3i
 ):
@@ -125,7 +125,7 @@ def k_advect_particles_rk2(
     p = xyz[pid]
     v1 = sample_velocity(p, u, v, w, h, G)
     v2 = sample_velocity(p + v1*(dt*0.5), u, v, w, h, G)
-    xyz[pid] = clamp_position(p + v2*dt, h, G)
+    xyz[pid] = clamp_position(p + invmass[pid] * v2*dt, h, G)
 
 @wp.kernel
 def k_inject_mouse(
@@ -229,38 +229,69 @@ def k_inject_audio_field(
     w_prev[tid] += wz
 
 @wp.kernel
-def k_set_velocity_fluid(
+def k_inject_gradient(
     u_prev: wp.array(dtype=float), v_prev: wp.array(dtype=float), w_prev: wp.array(dtype=float),
     grad_x: wp.array(dtype=float), grad_y: wp.array(dtype=float), lum: wp.array(dtype=float),
-    strength: float, G: wp.vec3i, depth_factor: float
+    strength: float, G: wp.vec3i, mode: int
 ):
     i = wp.tid() % G.x
     j = (wp.tid() // G.x) % G.y
     k = wp.tid() // (G.x*G.y)
-    depth_max = int(depth_factor * float(G.z))
-    if i < 1 or i >= G.x-1 or j < 1 or j >= G.y-1 or k < 1 or k >= depth_max:
+
+    if i < 1 or i >= G.x-1 or j < 1 or j >= G.y-1 or k < 1 or k >= G.z-1:    
         return
     id2 = i + G.x*j
     idx = i + G.x*j + G.x*G.y*k
     l = lum[id2]
     scale = float(k) / float(G.z)
 
-    u_prev[idx] = -grad_y[id2] * strength * l * scale * 2.0
-    v_prev[idx] = grad_x[id2] * strength * l * scale * 2.0
-    w_prev[idx] = l * strength * (0.5 - scale) * 1.0
-    # sign = float(1) if i % 10 < 5 else float(-1)
-    # w_prev[idx] = sign * 2.0 * l * strength * float(k) / float(depth_max)
-    # if i % 10 < 5:
-    #     v_prev[idx] -= (2.5 if j < G.y//2 else 0.5) * l * strength
-    # else:
-    #     if j < G.y//2:
-    #         v_prev[idx] += 0.5 * l * strength
-    #     else:
-    #         u_prev[idx] -= 0.5 * l * strength
+    if mode == 1:
+        dz = 0.0
+        if scale < 0.5:
+            dx = -grad_y[id2] * strength * (0.5 - scale) * 0.2
+            dy = grad_x[id2] * strength * (0.5 - scale) * 0.2
+            if l > 0.5:
+                dz = strength * l * l
+        elif scale < 0.9:
+            dx = grad_y[id2] * strength * (0.5 - scale) * 0.4
+            dy = -grad_x[id2] * strength * (0.5 - scale) * 0.4
+            if l < 0.5:
+                dz = -strength * (1.0 - l) * (1.0 - l) * 6.0
+        else:
+            dz = -strength
+        u_prev[idx] += dx
+        v_prev[idx] += dy
+        w_prev[idx] += dz
+        u_prev[idx] = wp.clamp(u_prev[idx], -0.5, 0.5)
+        v_prev[idx] = wp.clamp(v_prev[idx], -0.5, 0.5)
+        w_prev[idx] = wp.clamp(w_prev[idx], -0.5, 0.5)
+    elif mode == 2:
+        sign  = float(1) if i % 16 < 8 else float(-1)
+        w_prev[idx] = sign * 10.0 * lum[id2] * strength * (0.5 - scale)
 
-    # u_prev[idx] = -grad_y[id2] * strength * l * 8.0
-    # v_prev[idx] = grad_x[id2] * strength * l * 8.0
-    # w_prev[idx] = l * strength * (0.5 - scale) * 2.0
+        if i % 16 < 8:
+            v_prev[idx] -= wp.clamp(strength * l, -0.5, 0.5)
+        else:
+            if j < G.y//2:
+                v_prev[idx] += wp.clamp(strength * l, -0.5, 0.5)
+            else:
+                u_prev[idx] -= wp.clamp(strength * l, -0.5, 0.5)
+        u_prev[idx] = wp.clamp(u_prev[idx], -0.5, 0.5)
+        v_prev[idx] = wp.clamp(v_prev[idx], -0.5, 0.5)
+        if scale < 0.9:
+            w_prev[idx] = wp.clamp(w_prev[idx], -0.5, 0.5)
+        else:
+            w_prev[idx] = -strength
+    elif mode == 3:
+        dx = grad_x[id2] * strength * l * (0.5 - scale) * 2.0
+        dy = grad_y[id2] * strength * l * (0.5 - scale) * 2.0
+        dz = strength * l * (0.5 - scale) * 4.0
+        u_prev[idx] += dx
+        v_prev[idx] += dy
+        w_prev[idx] += dz
+        u_prev[idx] = wp.clamp(u_prev[idx], -0.5, 0.5)
+        v_prev[idx] = wp.clamp(v_prev[idx], -0.5, 0.5)
+        w_prev[idx] = wp.clamp(w_prev[idx], -0.5, 0.5)
 
 @wp.kernel
 def k_update_rotation(
@@ -318,24 +349,6 @@ def k_constraint_force(
     wp.atomic_add(xyz_corr, id0, w0 * displace)
     wp.atomic_sub(xyz_corr, id1, w1 * displace)
 
-    id2 = next[id1]
-    if id2 < 0:
-        return  
-    w2 = invmass[id2]
-    w = w0 + w2
-    if w == 0.0:
-        return
-    p2 = xyz[id2]
-    d = p2 - p0
-    l = wp.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
-    if l <= 0.0:
-        return    
-    n = d / l
-    alpha = compliance / dt / dt
-    displace = n * (l - 2.0 * l0) / (w + alpha)
-    wp.atomic_add(xyz_corr, id0, w0 * displace)
-    wp.atomic_sub(xyz_corr, id2, w2 * displace)
-
 @wp.kernel
 def k_add_corrections(
     xyz: wp.array(dtype=wp.vec3), xyz_corr: wp.array(dtype=wp.vec3),
@@ -349,7 +362,7 @@ def lum(image: wp.array(dtype=wp.uint8), idx: int) -> float:
     r = float(image[idx + 2])
     g = float(image[idx + 1])
     b = float(image[idx])
-    return 1.0 - (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
 
 @wp.kernel
 def k_goal_force(
@@ -483,9 +496,16 @@ def k_world_boundaries(
     p = xyz[tid]
     p_prior = xyz_prior[tid]
 
-    # Collision with world boundaries
+    x = p.x
+    y = p.y
+    z = p.z
+    x_prior = p_prior.x
+    y_prior = p_prior.y
+    z_prior = p_prior.z
+
     margin = h + r
     restitution = 0.9
+
     if p.x < margin:
         vx = p.x - p_prior.x
         x = margin
@@ -520,16 +540,188 @@ def k_world_boundaries(
     xyz[tid] = wp.vec3(x, y, z)
     xyz_prior[tid] = wp.vec3(x_prior, y_prior, z_prior)
 
+@wp.kernel
+def k_particles_to_grid(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_prior: wp.array(dtype=wp.vec3),
+    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float),
+    weight: wp.array(dtype=float),
+    dt: float,
+    h: float, G: wp.vec3i
+):
+    pid = wp.tid()
+
+    # Particle velocity from Verlet positions
+    vel = (xyz[pid] - xyz_prior[pid]) / dt
+
+    p = xyz[pid]
+    gx = p / h
+    x = wp.clamp(gx[0], 0.5, float(G.x - 1) + 0.5)
+    y = wp.clamp(gx[1], 0.5, float(G.y - 1) + 0.5)
+    z = wp.clamp(gx[2], 0.5, float(G.z - 1) + 0.5)
+
+    i0 = int(x); i1 = wp.min(i0 + 1, G.x - 1)
+    j0 = int(y); j1 = wp.min(j0 + 1, G.y - 1)
+    k0 = int(z); k1 = wp.min(k0 + 1, G.z - 1)
+
+    s1 = x - float(i0); s0 = 1.0 - s1
+    t1 = y - float(j0); t0 = 1.0 - t1
+    r1 = z - float(k0); r0 = 1.0 - r1
+
+    idx000 = i0 + G.x*j0 + G.x*G.y*k0
+    idx001 = i0 + G.x*j0 + G.x*G.y*k1
+    idx010 = i0 + G.x*j1 + G.x*G.y*k0
+    idx011 = i0 + G.x*j1 + G.x*G.y*k1
+    idx100 = i1 + G.x*j0 + G.x*G.y*k0
+    idx101 = i1 + G.x*j0 + G.x*G.y*k1
+    idx110 = i1 + G.x*j1 + G.x*G.y*k0
+    idx111 = i1 + G.x*j1 + G.x*G.y*k1
+
+    w000=s0*t0*r0; w001=s0*t0*r1; w010=s0*t1*r0; w011=s0*t1*r1
+    w100=s1*t0*r0; w101=s1*t0*r1; w110=s1*t1*r0; w111=s1*t1*r1
+
+    wp.atomic_add(u, idx000, vel[0]*w000); wp.atomic_add(u, idx001, vel[0]*w001)
+    wp.atomic_add(u, idx010, vel[0]*w010); wp.atomic_add(u, idx011, vel[0]*w011)
+    wp.atomic_add(u, idx100, vel[0]*w100); wp.atomic_add(u, idx101, vel[0]*w101)
+    wp.atomic_add(u, idx110, vel[0]*w110); wp.atomic_add(u, idx111, vel[0]*w111)
+
+    wp.atomic_add(v, idx000, vel[1]*w000); wp.atomic_add(v, idx001, vel[1]*w001)
+    wp.atomic_add(v, idx010, vel[1]*w010); wp.atomic_add(v, idx011, vel[1]*w011)
+    wp.atomic_add(v, idx100, vel[1]*w100); wp.atomic_add(v, idx101, vel[1]*w101)
+    wp.atomic_add(v, idx110, vel[1]*w110); wp.atomic_add(v, idx111, vel[1]*w111)
+
+    wp.atomic_add(w, idx000, vel[2]*w000); wp.atomic_add(w, idx001, vel[2]*w001)
+    wp.atomic_add(w, idx010, vel[2]*w010); wp.atomic_add(w, idx011, vel[2]*w011)
+    wp.atomic_add(w, idx100, vel[2]*w100); wp.atomic_add(w, idx101, vel[2]*w101)
+    wp.atomic_add(w, idx110, vel[2]*w110); wp.atomic_add(w, idx111, vel[2]*w111)
+
+    wp.atomic_add(weight, idx000, w000); wp.atomic_add(weight, idx001, w001)
+    wp.atomic_add(weight, idx010, w010); wp.atomic_add(weight, idx011, w011)
+    wp.atomic_add(weight, idx100, w100); wp.atomic_add(weight, idx101, w101)
+    wp.atomic_add(weight, idx110, w110); wp.atomic_add(weight, idx111, w111)
+
+@wp.kernel
+def k_normalize_grid_velocity(
+    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float),
+    weight: wp.array(dtype=float)
+):
+    tid = wp.tid()
+    wt = weight[tid]
+    if wt > 1e-6:
+        u[tid] = u[tid] / wt
+        v[tid] = v[tid] / wt
+        w[tid] = w[tid] / wt
+
+@wp.kernel
+def k_init_particle_vel(
+    xyz: wp.array(dtype=wp.vec3),
+    vel: wp.array(dtype=wp.vec3),
+    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float),
+    h: float, G: wp.vec3i
+):
+    pid = wp.tid()
+    vel[pid] = sample_velocity(xyz[pid], u, v, w, h, G)
+
+@wp.kernel
+def k_flip_update(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_prior: wp.array(dtype=wp.vec3),
+    vel: wp.array(dtype=wp.vec3),
+    u_new: wp.array(dtype=float), v_new: wp.array(dtype=float), w_new: wp.array(dtype=float),
+    u_old: wp.array(dtype=float), v_old: wp.array(dtype=float), w_old: wp.array(dtype=float),
+    alpha: float, dt: float, h: float, G: wp.vec3i
+):
+    pid = wp.tid()
+    p = xyz_prior[pid]
+
+    vel_pic = sample_velocity(p, u_new, v_new, w_new, h, G)
+    vel_old_grid = sample_velocity(p, u_old, v_old, w_old, h, G)
+    vel_du = vel_pic - vel_old_grid
+    vel_flip = vel[pid] + vel_du
+
+    vel_new = (1.0 - alpha) * vel_pic + alpha * vel_flip
+    vel[pid] = vel_new
+    xyz[pid] = clamp_position(p + vel_new * dt, h, G)
+
+@wp.kernel
+def k_particles_to_grid_vel(
+    xyz: wp.array(dtype=wp.vec3),
+    vel: wp.array(dtype=wp.vec3),
+    u: wp.array(dtype=float), v: wp.array(dtype=float), w: wp.array(dtype=float),
+    weight: wp.array(dtype=float),
+    h: float, G: wp.vec3i
+):
+    pid = wp.tid()
+
+    p = xyz[pid]
+    pv = vel[pid]
+
+    gx = p / h
+    x = wp.clamp(gx[0], 0.5, float(G.x - 1) + 0.5)
+    y = wp.clamp(gx[1], 0.5, float(G.y - 1) + 0.5)
+    z = wp.clamp(gx[2], 0.5, float(G.z - 1) + 0.5)
+
+    i0 = int(x); i1 = wp.min(i0 + 1, G.x - 1)
+    j0 = int(y); j1 = wp.min(j0 + 1, G.y - 1)
+    k0 = int(z); k1 = wp.min(k0 + 1, G.z - 1)
+
+    s1 = x - float(i0); s0 = 1.0 - s1
+    t1 = y - float(j0); t0 = 1.0 - t1
+    r1 = z - float(k0); r0 = 1.0 - r1
+
+    idx000 = i0 + G.x*j0 + G.x*G.y*k0
+    idx001 = i0 + G.x*j0 + G.x*G.y*k1
+    idx010 = i0 + G.x*j1 + G.x*G.y*k0
+    idx011 = i0 + G.x*j1 + G.x*G.y*k1
+    idx100 = i1 + G.x*j0 + G.x*G.y*k0
+    idx101 = i1 + G.x*j0 + G.x*G.y*k1
+    idx110 = i1 + G.x*j1 + G.x*G.y*k0
+    idx111 = i1 + G.x*j1 + G.x*G.y*k1
+
+    w000=s0*t0*r0; w001=s0*t0*r1; w010=s0*t1*r0; w011=s0*t1*r1
+    w100=s1*t0*r0; w101=s1*t0*r1; w110=s1*t1*r0; w111=s1*t1*r1
+
+    wp.atomic_add(u, idx000, pv[0]*w000); wp.atomic_add(u, idx001, pv[0]*w001)
+    wp.atomic_add(u, idx010, pv[0]*w010); wp.atomic_add(u, idx011, pv[0]*w011)
+    wp.atomic_add(u, idx100, pv[0]*w100); wp.atomic_add(u, idx101, pv[0]*w101)
+    wp.atomic_add(u, idx110, pv[0]*w110); wp.atomic_add(u, idx111, pv[0]*w111)
+
+    wp.atomic_add(v, idx000, pv[1]*w000); wp.atomic_add(v, idx001, pv[1]*w001)
+    wp.atomic_add(v, idx010, pv[1]*w010); wp.atomic_add(v, idx011, pv[1]*w011)
+    wp.atomic_add(v, idx100, pv[1]*w100); wp.atomic_add(v, idx101, pv[1]*w101)
+    wp.atomic_add(v, idx110, pv[1]*w110); wp.atomic_add(v, idx111, pv[1]*w111)
+
+    wp.atomic_add(w, idx000, pv[2]*w000); wp.atomic_add(w, idx001, pv[2]*w001)
+    wp.atomic_add(w, idx010, pv[2]*w010); wp.atomic_add(w, idx011, pv[2]*w011)
+    wp.atomic_add(w, idx100, pv[2]*w100); wp.atomic_add(w, idx101, pv[2]*w101)
+    wp.atomic_add(w, idx110, pv[2]*w110); wp.atomic_add(w, idx111, pv[2]*w111)
+
+    wp.atomic_add(weight, idx000, w000); wp.atomic_add(weight, idx001, w001)
+    wp.atomic_add(weight, idx010, w010); wp.atomic_add(weight, idx011, w011)
+    wp.atomic_add(weight, idx100, w100); wp.atomic_add(weight, idx101, w101)
+    wp.atomic_add(weight, idx110, w110); wp.atomic_add(weight, idx111, w111)
+
+@wp.kernel
+def k_update_vel_from_positions(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_prior: wp.array(dtype=wp.vec3),
+    vel: wp.array(dtype=wp.vec3),
+    dt: float
+):
+    pid = wp.tid()
+    vel[pid] = (xyz[pid] - xyz_prior[pid]) / dt
+
 class Simulator:
     def __init__(self,
         IMAGE_SIZE=512, PIXELS_PER_CELL=4,
         G=[128, 128, 32], L=1, smooth=15,
-        gradient_strength=0.1, pressure_steps=10, jacobi=0.1, dt=0.1
+        gradient_strength=0.1, pressure_steps=10, jacobi=0.1, dt=0.1, flip_alpha=0.95
     ):
         self.G = wp.vec3i(*G)
         self.h = 1.0 / max(self.G.x, self.G.y)    
         self.P = self.G * PIXELS_PER_CELL
         self.r = 0.5 * self.h / PIXELS_PER_CELL
+        self.L = L
 
         self.IMAGE_SIZE = IMAGE_SIZE
         self.smooth = smooth
@@ -539,9 +731,12 @@ class Simulator:
         self.jacobi = jacobi
         self.dt = dt
         self.dt0 = dt * float(max(self.G.x, self.G.y, self.G.z))
+        self.flip_alpha = flip_alpha
 
         pos = []
         n_x, n_y = [], []
+        n_xx, n_yy = [], []
+        n_du, n_dd = [], []
         x0 = self.h + self.r
         y0 = self.h + self.r
         z0 = self.h + self.r
@@ -549,14 +744,23 @@ class Simulator:
         PX_inner = self.P.x - 2 * PIXELS_PER_CELL
         PY_inner = self.P.y - 2 * PIXELS_PER_CELL
         particles = 0
-        for k in range(L):
+        for k in range(self.L):
             for j in range(PY_inner):
                 for i in range(PX_inner):
-                    pos.append([x0 + i * spacing, y0 + j * spacing, z0 + k * 2.0 * self.h])
+                    jz = self.r * 0.1 * (random.random() - 0.5)
+                    pos.append([x0 + i * spacing, y0 + j * spacing, z0 + k * 2.0 * self.h + jz])
                     if i < PX_inner - 1: n_x.append(particles + 1)
                     else: n_x.append(-1)
                     if j < PY_inner - 1: n_y.append(particles + PX_inner)
                     else: n_y.append(-1)
+                    if i < PX_inner - 2: n_xx.append(particles + 2)
+                    else: n_xx.append(-1)
+                    if j < PY_inner - 2: n_yy.append(particles + 2 * PX_inner)
+                    else: n_yy.append(-1)
+                    if i < PX_inner - 1 and j < PY_inner - 1: n_du.append(particles + 1 + PX_inner)
+                    else: n_du.append(-1)
+                    if i < PX_inner - 1 and j > 0: n_dd.append(particles + 1 - PX_inner)
+                    else: n_dd.append(-1)
 
                     particles += 1
         self.particles = len(pos)
@@ -565,10 +769,8 @@ class Simulator:
         self.xyz_prior = wp.array(pos, dtype=wp.vec3, device="cuda")
         self.xyz_goal = wp.array(pos, dtype=wp.vec3, device="cuda")
         self.xyz_base = wp.array(pos, dtype=wp.vec3, device="cuda")
-        # self.base_id = wp.zeros(self.particles, dtype=int, device="cuda")
-        # self.goal_id = wp.zeros(self.particles, dtype=int, device="cuda")
-        # self.color_id = wp.zeros(self.particles, dtype=int, device="cuda")
         self.xyz_corr = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
+        self.vel = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.rgb = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.rot = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.invmass = wp.ones(self.particles, dtype=float, device="cuda")
@@ -576,6 +778,10 @@ class Simulator:
         # Particle neighbors
         self.next_x = wp.array(n_x, dtype=int, device="cuda")
         self.next_y = wp.array(n_y, dtype=int, device="cuda")
+        self.next_xx = wp.array(n_xx, dtype=int, device="cuda")
+        self.next_yy = wp.array(n_yy, dtype=int, device="cuda")
+        self.next_du = wp.array(n_du, dtype=int, device="cuda")
+        self.next_dd = wp.array(n_dd, dtype=int, device="cuda")
         # Image buffers
         self.pixels = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda") 
         self.blurred = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda")
@@ -589,11 +795,15 @@ class Simulator:
         self.u      = wp.zeros(self.G3, dtype=float, device="cuda")
         self.v      = wp.zeros(self.G3, dtype=float, device="cuda")
         self.w      = wp.zeros(self.G3, dtype=float, device="cuda")
+        self.u_prior = wp.zeros(self.G3, dtype=float, device="cuda")
+        self.v_prior = wp.zeros(self.G3, dtype=float, device="cuda")
+        self.w_prior = wp.zeros(self.G3, dtype=float, device="cuda")
         self.u_prev = wp.zeros(self.G3, dtype=float, device="cuda")
         self.v_prev = wp.zeros(self.G3, dtype=float, device="cuda")
         self.w_prev = wp.zeros(self.G3, dtype=float, device="cuda")
         self.div    = wp.zeros(self.G3, dtype=float, device="cuda")
         self.p      = wp.zeros(self.G3, dtype=float, device="cuda")
+        self.p2g_weight = wp.zeros(self.G3, dtype=float, device="cuda")
 
         print(f"✓ SIM: simulator ready")
         print(f"    Image({self.IMAGE_SIZE},{self.IMAGE_SIZE})")
@@ -626,13 +836,6 @@ class Simulator:
         lum = wp.array(luminance.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
         return gx, gy, lum   
 
-    def inject_gradient(self, depth_factor=1.0):
-        wp.launch(k_set_velocity_fluid, dim=self.G3, inputs=[
-            self.u_prev, self.v_prev, self.w_prev,
-            self.grad_x, self.grad_y, self.lum, self.gradient_strength,
-            self.G, depth_factor
-        ], device="cuda")
-
     def new_image(self, img, depth_factor=1.0):
         for arr in [self.u, self.v, self.w,
                     self.u_prev, self.v_prev, self.w_prev,
@@ -643,34 +846,6 @@ class Simulator:
         blurred = cv2.GaussianBlur(img, (self.smooth, self.smooth), 0)
         self.blurred = wp.array(np.ascontiguousarray(blurred).flatten(), dtype=wp.uint8, device="cuda")
         self.grad_x, self.grad_y, self.lum = self._compute_gradients(blurred)
-
-        # wp.launch(k_base_id, dim=self.particles, inputs=[
-        #     self.rgb, self.color_id
-        # ], device="cuda")
-        # wp.synchronize()
-   
-        # color_id_np = self.color_id.numpy()
-        # sorted = np.argsort(color_id_np, kind="stable").astype(np.int32)
-        # self.base_id = wp.array(sorted, dtype=int, device="cuda")
-
-        # wp.launch(k_color_id, dim=self.particles, inputs=[
-        #     self.pixels, self.IMAGE_SIZE,
-        #     self.xyz_base, self.rgb, self.color_id,
-        #     self.h, self.G
-        # ], device="cuda")
-        # wp.synchronize()
-            
-        # color_id_np = self.color_id.numpy()
-        # rng = np.random.default_rng()
-        # tie = rng.random(len(color_id_np))
-        # sorted = np.lexsort((tie, color_id_np))
-        # self.goal_id = wp.array(sorted, dtype=int, device="cuda")
-
-        # wp.launch(k_new_image_sorted, dim=self.particles, inputs=[
-        #     self.pixels, self.blurred, self.IMAGE_SIZE,
-        #     self.xyz_base, self.xyz_goal, self.rgb, self.invmass, self.base_id, self.goal_id,
-        #     self.h, self.G, depth_factor
-        # ], device="cuda")
 
         wp.launch(k_new_image, dim=self.particles, inputs=[
             self.pixels, self.blurred, self.IMAGE_SIZE,
@@ -709,63 +884,145 @@ class Simulator:
             self.G
         ], device="cuda")
 
-    def _apply_constraints(self):
+    def _inject_gradient(self, mode=0):
+        if mode == 0:
+            return
+        wp.launch(k_inject_gradient, dim=self.G3, inputs=[
+            self.u_prev, self.v_prev, self.w_prev,
+            self.grad_x, self.grad_y, self.lum, self.gradient_strength,
+            self.G, mode
+        ], device="cuda")
+
+    def _apply_constraints(self, mode=0):
         self.xyz_corr.zero_()
-        for bond, l0 in [
-            (self.next_y, 2.0 * self.r),
-            (self.next_x, 2.0 * self.r)
-        ]:
-            wp.launch(k_constraint_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_corr,
-                self.invmass, bond, l0, 0.0, self.dt
-            ], device="cuda")
+        if mode == 0:
+            return
+        elif mode == 1: # Thread
+            for bond, l0 in [
+                (self.next_y, 2.0 * self.r),
+                (self.next_yy, 4.0 * self.r)
+            ]:
+                wp.launch(k_constraint_force, dim=self.particles, inputs=[
+                    self.xyz, self.xyz_corr,
+                    self.invmass, bond, l0, 0.0, self.dt
+                ], device="cuda")
+        elif mode == 2: # Cloth
+            aux = 2.0 * np.sqrt(2.0)
+            for bond, l0 in [
+                (self.next_y, 2.0 * self.r),
+                (self.next_x, 2.0 * self.r),
+                (self.next_yy, 4.0 * self.r),
+                (self.next_xx, 4.0 * self.r),
+                (self.next_du, aux * self.r),
+                (self.next_dd, aux * self.r),
+            ]:
+                wp.launch(k_constraint_force, dim=self.particles, inputs=[
+                    self.xyz, self.xyz_corr,
+                    self.invmass, bond, l0, 0.0, self.dt
+                ], device="cuda")
         wp.launch(k_add_corrections, dim=self.particles, inputs=[
             self.xyz, self.xyz_corr,
             self.jacobi
         ], device="cuda")
 
     def _apply_boundaries(self):
-        h = self.config.h
         wp.launch(k_world_boundaries, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior,
             self.r, self.h, self.G
         ], device="cuda")
 
-    def update(self, constraints_on=True, go_back_on=True, ):
-        # Grid
+    def update_fluid(self, go_back_on=True):
+        # Grid   
         wp.launch(k_add_source, dim=self.G3, inputs=[self.u, self.u_prev, self.dt], device="cuda")
         wp.launch(k_add_source, dim=self.G3, inputs=[self.v, self.v_prev, self.dt], device="cuda")
         wp.launch(k_add_source, dim=self.G3, inputs=[self.w, self.w_prev, self.dt], device="cuda")
-
         wp.launch(k_advect, dim=self.G3, inputs=[self.u_prev, self.u, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
         wp.launch(k_advect, dim=self.G3, inputs=[self.v_prev, self.v, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
         wp.launch(k_advect, dim=self.G3, inputs=[self.w_prev, self.w, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
         self.u, self.u_prev = self.u_prev, self.u
         self.v, self.v_prev = self.v_prev, self.v
         self.w, self.w_prev = self.w_prev, self.w
-
         self.project()
 
         # Particles
         wp.copy(self.xyz_prior, self.xyz)
         wp.launch(k_advect_particles_rk2, dim=self.particles, inputs=[
-            self.xyz, self.u, self.v, self.w, self.dt, self.h, self.G
+            self.xyz, self.u, self.v, self.w, self.invmass, self.dt, self.h, self.G
         ], device="cuda")
-        
-        if constraints_on:
-            self._apply_constraints()
 
         if go_back_on:
             wp.launch(k_goal_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_goal, 0.02
+                self.xyz, self.xyz_goal, 0.1
             ], device="cuda")
 
-        self._apply_constraints()
+        self._apply_boundaries()
 
         wp.launch(k_update_rotation, dim=self.particles, inputs=[
-            self.xyz, self.xyz_prior,
-            self.rot,
-            0.1 * self.r, 0.1
+            self.xyz, self.xyz_prior, self.rot, 0.1 * self.r, 0.1
+        ], device="cuda")
+
+        self.u_prev.zero_()
+        self.v_prev.zero_()
+        self.w_prev.zero_()
+
+    def update_flip(self, go_back_on=True, constraints_mode=0, gradient_mode=0):
+        # Grid
+        wp.copy(self.u_prior, self.u)
+        wp.copy(self.v_prior, self.v)
+        wp.copy(self.w_prior, self.w)
+    
+        self._inject_gradient(mode=gradient_mode)
+        wp.launch(k_add_source, dim=self.G3, inputs=[self.u, self.u_prev, self.dt], device="cuda")
+        wp.launch(k_add_source, dim=self.G3, inputs=[self.v, self.v_prev, self.dt], device="cuda")
+        wp.launch(k_add_source, dim=self.G3, inputs=[self.w, self.w_prev, self.dt], device="cuda")
+        wp.launch(k_advect, dim=self.G3, inputs=[self.u_prev, self.u, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
+        wp.launch(k_advect, dim=self.G3, inputs=[self.v_prev, self.v, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
+        wp.launch(k_advect, dim=self.G3, inputs=[self.w_prev, self.w, self.u, self.v, self.w, self.dt0, self.G], device="cuda")
+        self.u, self.u_prev = self.u_prev, self.u
+        self.v, self.v_prev = self.v_prev, self.v
+        self.w, self.w_prev = self.w_prev, self.w
+        self.project()
+
+        # Particles
+        wp.copy(self.xyz_prior, self.xyz)
+        wp.launch(k_flip_update, dim=self.particles, inputs=[
+            self.xyz, self.xyz_prior, self.vel,
+            self.u, self.v, self.w,
+            self.u_prior, self.v_prior, self.w_prior,
+            self.flip_alpha, self.dt, self.h, self.G
+        ], device="cuda")
+
+        if go_back_on:
+            wp.launch(k_goal_force, dim=self.particles, inputs=[
+                self.xyz, self.xyz_goal, 0.005
+            ], device="cuda")
+
+        self._apply_constraints(mode=constraints_mode)
+        self._apply_boundaries()
+
+        # Keep particle velocity consistent with post-correction positions
+        wp.launch(k_update_vel_from_positions, dim=self.particles, inputs=[
+            self.xyz, self.xyz_prior, self.vel, self.dt
+        ], device="cuda")
+
+        # P2G rebuild from particle velocities
+        self.u.zero_()
+        self.v.zero_()
+        self.w.zero_()
+        self.p2g_weight.zero_()
+
+        wp.launch(k_particles_to_grid_vel, dim=self.particles, inputs=[
+            self.xyz, self.vel,
+            self.u, self.v, self.w, self.p2g_weight,
+            self.h, self.G
+        ], device="cuda")
+        wp.launch(k_normalize_grid_velocity, dim=self.G3, inputs=[
+            self.u, self.v, self.w, self.p2g_weight
+        ], device="cuda")
+        self.project()
+
+        wp.launch(k_update_rotation, dim=self.particles, inputs=[
+            self.xyz, self.xyz_prior, self.rot, 0.1 * self.r, 0.1
         ], device="cuda")
 
         self.u_prev.zero_()

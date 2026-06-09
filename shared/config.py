@@ -12,7 +12,7 @@ class Config:
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
     WINDOW_W, WINDOW_H = 2048, 2048#512, 512#1080, 1080#2160, 2160
-    IMAGE_SIZE = 1024
+    IMAGE_SIZE = 512
     GRID_SIZE = 128
     PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
@@ -71,14 +71,19 @@ class Config:
     AD_CONTROLNET_ID   = "guoyww/animatediff-sparsectrl-rgb"
     AD_MOTION_ADAPTER  = "guoyww/animatediff-motion-adapter-v1-5-2"
     AD_SD_BASE         = "Lykon/dreamshaper-8"
-    AD_INFERENCE_STEPS = 12
+    AD_INFERENCE_STEPS = 8
     AD_GUIDANCE_SCALE  = 7.5
     AD_NUM_FRAMES      = 16
-    CONTROLNET_SCALE   = 0.5
+    AD_CONTROLNET_SCALE   = 0.5
     AD_SEED            = 80367253
+    CLIPS_PER_SCENE  = 2
+    RAW_QUEUE_MAXSIZE = 64
+    DISPLAY_MAXFRAMES = 500
+    GLOBAL_STYLE    = "minimalist"
+    GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
 
     # Optical flow
-    OF_FRAMES = 12
+    OF_FRAMES = 3
 
     STYLE = {
         "Botanical Lithograph": {
@@ -347,4 +352,30 @@ class Config:
         ("roll-cw",  0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
         ("roll-ccw", 0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
         (None,       None, "sways gently in the wind",    None),
+    ]
+
+    SUBJECTS = [
+        "colossal shell",
+        #"tiny abandoned house floating",
+        #"jellyfish beneath a hot air balloon",
+        #"tiny seagulls in the horizon",
+        "colossal ivory white sculptural on the beach",
+        #"a giant ship stuck in the sand",
+        "giant wave",
+        "person with pomegranate diving helmet and scarf on the desert",
+        #"person with thick black goggles and indigo blue scarf on the desert",
+        #"person with thick black goggles and covid mask on orange desert",
+        "colossal barnacled shell",
+        #"kinetic sculpture on the beach",
+        #"crowd of people rushing on the orange subway",
+        #"crowd of people with red kart in supermarket",
+        #"crowd of people with shopping carts in crowded supermarket",
+        #"birds eye of beach",
+        #"birds eye of crowded city with red bridges",
+        #"colossal red coral sculpture on the beach",
+        #"colossal sea anemone in the desert",
+        "pufferfish flying in the sky like a balloon",
+        #"waterfall in forest",
+        #"alien ship in the sea",
+        #"rusty toaster on the beach",
     ]

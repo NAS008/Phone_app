@@ -35,6 +35,7 @@ import numpy as np
 import time
 import asyncio
 import ctypes
+ctypes.windll.user32.SetProcessDPIAware()
 import time
 import concurrent.futures
 from collections import deque
@@ -42,15 +43,15 @@ from PIL import Image
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
-from session import Session
 from bus import Bus
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
+from session import Session
 from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera, Mic, Mouse, OneEuro
 from gemini import Gemini
 from director import Director
-ctypes.windll.user32.SetProcessDPIAware()
 
 def get_first_part(parts, kind):
     for part in parts or []:

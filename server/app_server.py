@@ -24,6 +24,7 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from gemini import Gemini, GeminiBlockedError
 from sd35 import StableDiffusion, AnimateDiff
 
@@ -116,7 +117,7 @@ async def main():
                 NUM_FRAMES=config.AD_NUM_FRAMES,
                 INFERENCE_STEPS=config.AD_INFERENCE_STEPS,
                 GUIDANCE_SCALE=config.AD_GUIDANCE_SCALE,
-                CONTROLNET_SCALE=config.CONTROLNET_SCALE,
+                CONTROLNET_SCALE=config.AD_CONTROLNET_SCALE,
                 SEED=config.AD_SEED,
             )
         return _ad
@@ -215,14 +216,21 @@ async def main():
                 await _publish_error(effective_session_id, "Animation failed. Please try again.", turn_id)
                 return
 
-            for pil_frame in frames:
-                frame_bytes = bgr_to_jpeg(pil_to_bgr(pil_frame))
-                await bus.publish_ai_message_to_pc(
-                    session_id=effective_session_id, nickname="NonCarbon Artist",
-                    image_bytes=frame_bytes, image_mime_type="image/jpeg",
-                    image_purpose="output", turn_id=turn_id,
-                )
-                await asyncio.sleep(1.0 / config.FPS)
+            if not frames:
+                await _publish_error(effective_session_id, "Animation returned no frames.", turn_id)
+                return
+
+            try:
+                for pil_frame in frames:
+                    frame_bytes = bgr_to_jpeg(pil_to_bgr(pil_frame))
+                    await bus.publish_ai_message_to_pc(
+                        session_id=effective_session_id, nickname="NonCarbon Artist",
+                        image_bytes=frame_bytes, image_mime_type="image/jpeg",
+                        image_purpose="output", turn_id=turn_id,
+                    )
+                    await asyncio.sleep(1.0 / config.FPS)
+            except Exception as e:
+                print(f"✗ Server: AnimateDiff frame publish failed: {e}")
 
             last_frame_bgr = pil_to_bgr(frames[-1])
             last_generated_image_bgr = last_frame_bgr
@@ -315,16 +323,19 @@ async def main():
 
                 executor.submit(sd_worker)
                 frame_count = 0
-                while True:
-                    frame = await q.get()
-                    if frame is None:
-                        break
-                    await bus.publish_ai_message_to_pc(
-                        session_id=effective_session_id, nickname="NonCarbon Artist",
-                        image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
-                        image_purpose="output", turn_id=turn_id,
-                    )
-                    frame_count += 1
+                try:
+                    while True:
+                        frame = await q.get()
+                        if frame is None:
+                            break
+                        await bus.publish_ai_message_to_pc(
+                            session_id=effective_session_id, nickname="NonCarbon Artist",
+                            image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
+                            image_purpose="output", turn_id=turn_id,
+                        )
+                        frame_count += 1
+                except Exception as e:
+                    print(f"✗ Server: SD frame publish failed: {e}")
                 print(f"✓ Server: SD journey published {frame_count} frames to PC")
             else:
                 # Mode 0: send Gemini result directly.

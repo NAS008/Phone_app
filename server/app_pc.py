@@ -208,6 +208,7 @@ async def main():
     gif_last_frame = None
     GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
     overlay_on = True # To show or hide QR code
+    joined_users = {"Director"}
 
     # Window setup
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
@@ -454,7 +455,21 @@ async def main():
         except Exception as exc:
             print(f"✗ PC: GIF upload failed — {exc}")
 
+    async def on_user_joined(session_id, nickname):
+        nonlocal overlay_on
+        if str(session_id) != str(session.session_id) and str(session_id) != config.ADMIN_SESSION_ID:
+            return
+        if not nickname:
+            return
+        joined_users.add(nickname)
+        print(f"✓ PC: user joined '{nickname}' (total {len(joined_users) - 1} human users)")
+        if len(joined_users) > config.MAX_USERS:
+            overlay_on = False
+            await bus.publish_settings(overlay_on=False)
+            print(f"✓ PC: overlay hidden — max users ({config.MAX_USERS}) reached")
+
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
+    bus.on(Bus.USER_JOINED, on_user_joined)
     bus.on(Bus.USER_LIKE, on_user_like)
     bus.on(Bus.USER_VIDEO, on_user_video)
     bus.on(Bus.SETTINGS, on_settings)

@@ -45,6 +45,7 @@ class Config:
     
     # Context
     CONTEXT_SIZE = 20  # max conversation turns kept per session
+    MAX_USERS = 5
 
     # Phone backend (for direct HTTP uploads that bypass the bus)
     PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
@@ -83,7 +84,7 @@ class Config:
     GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
 
     # Optical flow
-    OF_FRAMES = 12
+    OF_FRAMES = 16
 
     STYLE = {
         "Botanical Lithograph": {

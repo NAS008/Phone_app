@@ -1,19 +1,19 @@
-# Director — scene automation + Gemini prompt generation for the fluid ray-trace visualiser
+# Director — scene automation + prompt for the fluid ray-trace visualiser
 # --------
 #     from director import Director
-#     director = Director(bus, gemini, config, ray, sim, lambda: session.session_id)
-#     director.ray_fov = config.fov
+#     director = Director(bus, config,
+#         mouse_move_fn=lambda px, py: mouse.callback(cv2.EVENT_MOUSEMOVE, px, py, 0, None),
+#         session_getter=lambda: session.session_id)
 #     director.start()
-#     director.enable()
+#     director.enable_auto_play()   # or enable_auto_gen()
 #
 #     # inside while True:
 #     if director.enabled:
-#         director.tick(now)
-#         sim_go_back_on       = director.sim_go_back
-#         sim_constraints_mode = director.sim_constraints_mode
-#         sim_gradient_mode    = director.sim_gradient_mode
-#         ray_shape            = director.ray_shape
-#         ray.fov += (director.ray_fov - ray.fov) * 0.1
+#         director.tick(now)          # publishes changed settings to bus; calls mouse_move_fn
+#         ray.fov += (fov_target - ray.fov) * 0.1   # fov_target updated by on_settings
+#         if director.ms_on:
+#             pos = mouse.pos.copy(); pos[2] = sim.h + sim.r
+#             sim.inject_mouse(pos, mouse.vel)
 
 import time
 import numpy as np
@@ -21,8 +21,6 @@ from scipy.interpolate import CubicSpline
 import asyncio
 import random
 import uuid
-from google.genai import types as gtypes
-from ui import _compute_vel, _lowpass_vel, _clamp_vel
 
 class MousePathHelper:
     """
@@ -66,21 +64,19 @@ class MousePathHelper:
 
 class Director:
     """
-    Unified Director: drives display automation (mouse, FOV, shape, constraints, gradient)
-    and generates Gemini image prompts sent to app_server via the bus.
+    Two modes when active:
+      - auto_play: sends empty USER_MESSAGE (server picks from folder) every interval;
+                   drives mouse, FOV, shape (0-4,6), constraints, gradient, go_back.
+      - auto_gen:  sends themed prompt every interval; forces go_back for 5 s then shape=5.
+                   No mouse, no FOV cycling, no constraint/gradient driving.
 
-    Two independent loops when enabled:
-      - Prompt loop: picks a random theme, asks Gemini for a creative one-sentence prompt,
-        publishes it as a USER_MESSAGE so app_server generates a new image.
-      - Tick (sync): called every frame to drive all simulation/render variables.
+    All settings changes are published to the bus via publish_settings() so that
+    app_pc and app_phone stay in sync without the Director holding sim/ray references.
+    Mouse simulation is delegated entirely to mouse_move_fn (Mouse.callback); only ms_on
+    is exposed so app_pc knows when to inject mouse pos/vel from the shared Mouse object.
     """
 
     NICKNAME = "Director"
-    _SYSTEM_PROMPT = (
-        "You are an art director for a live generative art installation. "
-        "Given a visual theme, invent a fresh, evocative one-sentence image prompt. "
-        "Be poetic and specific. Return only the prompt text — no preamble, no quotes."
-    )
     _THEMES = [
         "colossal shell",
         "tiny abandoned house floating",
@@ -101,7 +97,7 @@ class Director:
         "rusty toaster on the beach",
     ]
 
-    _N_SHAPES = 7
+    _AUTO_PLAY_SHAPES = [0, 1, 2, 3, 4]  # shape 5 (flat) reserved for auto_gen
     _HUMAN_PATHS = [
         # 1. Lazy drift across centre
         [(0.5, 0.5), (0.22, 0.52),
@@ -133,30 +129,27 @@ class Director:
          (0.67, 0.28), (0.74, 0.27)],
     ]
 
-    def __init__(self, bus, gemini, config, ray, sim, session_getter):
-        self.bus             = bus
-        self.gemini          = gemini
-        self.config          = config
-        self.ray             = ray
-        self.sim             = sim
-        self._session_getter = session_getter
-        self._dt             = 1.0 / config.FPS_SIM
+    def __init__(self, bus, config, mouse_move_fn, session_getter):
+        self.bus              = bus
+        self.config           = config
+        self._mouse_move_fn   = mouse_move_fn   # callable(px: int, py: int) -> None
+        self._session_getter  = session_getter
 
-        self._enabled = False
+        self._mode    = None   # None | "auto_play" | "auto_gen"
         self._tasks   = []
         self._t0      = 0.0
         self._rng     = np.random.default_rng()
         self._path    = MousePathHelper(config.WINDOW_W, config.WINDOW_H)
 
-        # Public state (read by app_pc main loop each tick)
-        self.ms_on                = True
-        self.ms_pos               = np.array([0.5, 0.5, sim.h + sim.r], dtype=np.float32)
-        self.ms_vel               = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        self.sim_go_back          = False
-        self.sim_constraints_mode = 0
-        self.sim_gradient_mode    = 0
-        self.ray_shape            = 0
-        self.ray_fov              = getattr(config, "fov", 1.0)
+        # ms_on is the only mouse state Director owns; pos/vel live in the Mouse object
+        self.ms_on = False
+
+        # Settings state — not exposed; changes published via bus.publish_settings()
+        self._ray_shape      = 0
+        self._ray_fov        = getattr(config, "fov", 1.0)
+        self._sim_go_back    = False
+        self._sim_constraints = 0
+        self._sim_gradient   = 0
 
         # Internal bookkeeping
         self._mouse_path_end    = 0.0
@@ -164,36 +157,65 @@ class Director:
         self._fov_phase         = "idle"   # idle | zoomed | shape_changed
         self._fov_last_step_t   = 0.0
         self._fov_cycle_last    = -30.0    # first zoom fires at t=30 s
-        self._image_gen_t       = None     # perf_counter when last prompt was sent
+        self._image_gen_t       = None     # perf_counter when last image send was triggered
 
     # ── Public API ──────────────────────────────────────────────────────────────
 
     @property
-    def enabled(self):
-        return self._enabled
+    def mode(self):
+        return self._mode
 
-    def enable(self):
-        if self._enabled:
+    @property
+    def enabled(self):
+        return self._mode is not None
+
+    def enable_auto_play(self):
+        if self._mode == "auto_play":
             return
-        self._enabled = True
-        self._tasks = [asyncio.ensure_future(self._prompt_loop())]
+        coming_from_auto_gen = (self._mode == "auto_gen")
+        self._cancel_tasks()
+        self._mode = "auto_play"
+        if coming_from_auto_gen:
+            self._ray_shape   = 0
+            self._sim_go_back = False
+            asyncio.ensure_future(self.bus.publish_settings(shape=0, go_back_on=False))
+        self._tasks = [asyncio.ensure_future(self._auto_play_loop())]
         print("✓ Director: auto-play started")
 
-    def disable(self):
-        if not self._enabled:
+    def enable_auto_gen(self):
+        if self._mode == "auto_gen":
             return
-        self._enabled = False
+        self._cancel_tasks()
+        self._mode = "auto_gen"
+        self._tasks = [asyncio.ensure_future(self._auto_gen_loop())]
+        print("✓ Director: auto-gen started")
+
+    def disable(self):
+        if self._mode is None:
+            return
+        was_auto_gen = (self._mode == "auto_gen")
+        self._cancel_tasks()
+        self._mode = None
+        self.ms_on = False
+        if was_auto_gen:
+            self._ray_shape   = 0
+            self._sim_go_back = False
+        asyncio.ensure_future(self._publish_user_mode())
+        print("✓ Director: stopped")
+
+    def _cancel_tasks(self):
         for t in self._tasks:
             t.cancel()
         self._tasks = []
-        print("✓ Director: auto-play stopped")
 
-    def sync_from_state(self, ray_shape, sim_go_back, constraints_mode, gradient_mode):
-        """Seed public state from app before enabling so Director continues from current display state."""
-        self.ray_shape = ray_shape
-        self.sim_go_back = sim_go_back
-        self.sim_constraints_mode = constraints_mode
-        self.sim_gradient_mode = gradient_mode
+    def sync_from_state(self, ray_shape, sim_go_back, constraints_mode, gradient_mode, ray_fov=None):
+        """Seed internal state from app before enabling so Director continues from current display state."""
+        self._ray_shape       = ray_shape
+        self._sim_go_back     = sim_go_back
+        self._sim_constraints = constraints_mode
+        self._sim_gradient    = gradient_mode
+        if ray_fov is not None:
+            self._ray_fov = ray_fov
 
     def start(self):
         """Call once before the main loop to initialise timing."""
@@ -201,73 +223,111 @@ class Director:
         self._generate_mouse_path(self._t0)
 
     def tick(self, now: float) -> None:
-        """Drive all display rules. Call every main-loop iteration when enabled."""
-        t = now - self._t0
-        self._rule_mouse(now, t)
-        self._rule_fov_zoom(now, t)
-        self._rule_go_back(now, t)
-        self._rule_constraints(t)
-        self._rule_gradient(t)
+        """Drive display rules and publish any changed settings. Called every main-loop iteration when enabled."""
+        prev_shape       = self._ray_shape
+        prev_fov         = self._ray_fov
+        prev_go_back     = self._sim_go_back
+        prev_constraints = self._sim_constraints
+        prev_gradient    = self._sim_gradient
 
-    # ── Prompt loop ──────────────────────────────────────────────────────────────
+        if self._mode == "auto_play":
+            t = now - self._t0
+            self._rule_mouse(now, t)
+            self._rule_fov_zoom_auto_play(now, t)
+            self._rule_go_back(now, t)
+            self._rule_constraints(t)
+            self._rule_gradient(t)
+        elif self._mode == "auto_gen":
+            self.ms_on = False
 
-    async def _prompt_loop(self):
-        while self._enabled:
+        changed = {}
+        if self._ray_shape != prev_shape:
+            changed['shape'] = self._ray_shape
+        if abs(self._ray_fov - prev_fov) > 1e-4:
+            changed['zoom'] = self._ray_fov
+        if self._sim_go_back != prev_go_back:
+            changed['go_back_on'] = self._sim_go_back
+        if self._sim_constraints != prev_constraints:
+            changed['constraints_mode'] = self._sim_constraints
+        if self._sim_gradient != prev_gradient:
+            changed['gradient_mode'] = self._sim_gradient
+
+        if changed:
+            asyncio.ensure_future(self.bus.publish_settings(**changed))
+
+    # ── Background loops ─────────────────────────────────────────────────────────
+
+    async def _auto_play_loop(self):
+        while self._mode == "auto_play":
+            try:
+                await self._pick_from_folder()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"✗ Director: auto-play loop error: {e}")
+            await asyncio.sleep(self.config.DIRECTOR_PROMPT_INTERVAL)
+
+    async def _auto_gen_loop(self):
+        # One-time startup: go_back for 5 s then lock into flat mode
+        self._sim_go_back = True
+        await self.bus.publish_settings(go_back_on=True)
+        await asyncio.sleep(5.0)
+        if self._mode != "auto_gen":
+            return
+        self._ray_shape   = 5
+        self._sim_go_back = False
+        await self.bus.publish_settings(shape=5, go_back_on=False)
+        print("✓ Director: flat mode locked for auto-gen")
+
+        while self._mode == "auto_gen":
             try:
                 await self._generate_and_send_prompt()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f"✗ Director: prompt loop error: {e}")
+                print(f"✗ Director: auto-gen loop error: {e}")
             await asyncio.sleep(self.config.DIRECTOR_PROMPT_INTERVAL)
+
+    async def _pick_from_folder(self):
+        session_id = self._session_getter()
+        if not session_id:
+            return
+        await self.bus.publish_user_message(
+            session_id=session_id,
+            nickname=self.NICKNAME,
+            turn_id=uuid.uuid4().hex,
+        )
+        self._image_gen_t = time.perf_counter()
+        print("✓ Director: folder pick triggered")
 
     async def _generate_and_send_prompt(self):
         session_id = self._session_getter()
         if not session_id:
             return
-
-        theme = random.choice(self._THEMES)
-        print(f"✓ Director: Picked theme {theme}")
-        prompt_text = ""
-        try:
-            response = self.gemini.client.models.generate_content(
-                model=self.gemini.TEXT_MODEL,
-                contents=[gtypes.Content(role="user", parts=[gtypes.Part(text=f"Theme: {theme}")])],
-                config=gtypes.GenerateContentConfig(system_instruction=self._SYSTEM_PROMPT),
-            )
-            if hasattr(response, "text") and response.text:
-                prompt_text = response.text.strip()
-                print(f"✓ Director: Generated prompt {prompt_text}")
-        except Exception as e:
-            print(f"✗ Director: Gemini prompt generation failed: {e}")
-
-        if not prompt_text:
-            prompt_text = theme
-
-        print(f"✓ Director: theme='{theme}', '{prompt_text[:70]}…'")
+        prompt_text = random.choice(self._THEMES)
         await self.bus.publish_user_message(
             session_id=session_id,
             nickname=self.NICKNAME,
             text=prompt_text,
             turn_id=uuid.uuid4().hex,
         )
-        self._image_gen_t = time.perf_counter()
-        await self.bus.publish_settings(go_back_on=True)
-        asyncio.ensure_future(self._activate_flat_mode())
-        print(f"✓ Director: image generation triggered — go_back for 5 s then flat mode")
+        print(f"✓ Director: auto-gen prompt sent — '{prompt_text}'")
 
-    async def _activate_flat_mode(self):
-        await asyncio.sleep(5.0)
-        if not self._enabled:
-            return
-        self.ray_shape = 5
-        await self.bus.publish_settings(shape=5)
-        print("✓ Director: flat mode activated — ready for new hires frames")
+    async def _publish_user_mode(self):
+        """Publish full settings snapshot when returning to user mode so app_pc and phone sync."""
+        await self.bus.publish_settings(
+            director_mode='user',
+            shape=self._ray_shape,
+            go_back_on=self._sim_go_back,
+            constraints_mode=self._sim_constraints,
+            gradient_mode=self._sim_gradient,
+            zoom=self._ray_fov,
+        )
 
     # ── Display rules ────────────────────────────────────────────────────────────
 
     def _rule_mouse(self, now: float, t: float) -> None:
-        """10 s active, 20 s rest cycle."""
+        """10 s active, 20 s rest cycle. Delegates to mouse_move_fn so Mouse handles filtering."""
         ACTIVE = 10.0
         REST   = 20.0
         PERIOD = ACTIVE + REST
@@ -275,24 +335,22 @@ class Director:
 
         if phase_t >= ACTIVE:
             self.ms_on = False
-            self.ms_vel *= 0.9
             return
 
         self.ms_on = True
         if now >= self._mouse_path_end:
             self._generate_mouse_path(now, duration=ACTIVE)
 
-        old_pos   = self.ms_pos.copy()
-        local_t   = now - self._mouse_path_t0
-        self.ms_pos     = self._path.sample(local_t)
-        self.ms_pos[2]  = self.sim.h + self.sim.r
+        local_t = now - self._mouse_path_t0
+        pos = self._path.sample(local_t)
+        # Path y=0 is screen-top; pixel y=0 is also screen-top — direct scale, no flip
+        self._mouse_move_fn(
+            int(pos[0] * self.config.WINDOW_W),
+            int(pos[1] * self.config.WINDOW_H),
+        )
 
-        raw_vel = _compute_vel(self.ms_pos, old_pos, self._dt, z_gain=1.5)
-        raw_vel = _clamp_vel(raw_vel, max_xy=5.0, max_z=8.0)
-        self.ms_vel = _lowpass_vel(self.ms_vel, raw_vel, alpha=0.2)
-
-    def _rule_fov_zoom(self, now: float, t: float) -> None:
-        """Every 60 s: snap to zoomed FOV, cycle shape, snap back."""
+    def _rule_fov_zoom_auto_play(self, now: float, t: float) -> None:
+        """Every 60 s: snap to zoomed FOV, cycle shape (skipping 5), snap back."""
         CYCLE            = 60.0
         HOLD_ZOOM        = 3.0
         HOLD_AFTER_SHAPE = 2.0
@@ -302,48 +360,53 @@ class Director:
                 self._fov_cycle_last  = t
                 self._fov_phase       = "zoomed"
                 self._fov_last_step_t = now
-                self.ray_fov = float(self._rng.choice(np.array([0.1, 0.2, 0.3])))
+                self._ray_fov = float(self._rng.choice(np.array([0.1, 0.2, 0.3])))
             return
         elif self._fov_phase == "zoomed":
             if now - self._fov_last_step_t >= HOLD_ZOOM:
-                self.ray_shape        = (self.ray_shape + 1) % self._N_SHAPES
+                shapes = self._AUTO_PLAY_SHAPES
+                try:
+                    idx = shapes.index(self._ray_shape)
+                except ValueError:
+                    idx = 0
+                self._ray_shape       = shapes[(idx + 1) % len(shapes)]
                 self._fov_phase       = "shape_changed"
                 self._fov_last_step_t = now
             return
         elif self._fov_phase == "shape_changed":
             if now - self._fov_last_step_t >= HOLD_AFTER_SHAPE:
-                self.ray_fov    = 1.0
+                self._ray_fov   = 1.0
                 self._fov_phase = "idle"
             return
 
     def _rule_go_back(self, now: float, t: float) -> None:
         """5 s on when image gen fires; otherwise 40 s off, 2 s on, 5 s off, 3 s on."""
         if self._image_gen_t is not None and now - self._image_gen_t < 5.0:
-            self.sim_go_back = True
+            self._sim_go_back = True
             return
         PERIOD  = 50.0
         phase_t = t % PERIOD
         if phase_t < 40.0:
-            self.sim_go_back = False
+            self._sim_go_back = False
         elif phase_t < 42.0:
-            self.sim_go_back = True
+            self._sim_go_back = True
         elif phase_t < 47.0:
-            self.sim_go_back = False
+            self._sim_go_back = False
         else:
-            self.sim_go_back = True
+            self._sim_go_back = True
 
     def _rule_constraints(self, t: float) -> None:
         """Shape 0 forces mode 2; shape 3 alternates 1/2; others cycle 0-2."""
-        if self.ray_shape == 0:
-            self.sim_constraints_mode = 2
-        elif self.ray_shape == 3:
+        if self._ray_shape == 0:
+            self._sim_constraints = 2
+        elif self._ray_shape == 3:
             PERIOD = 30.0
             OFFSET = 22.5
-            self.sim_constraints_mode = 1 + (int((t + OFFSET) / PERIOD) % 2)
+            self._sim_constraints = 1 + (int((t + OFFSET) / PERIOD) % 2)
         else:
             PERIOD = 30.0
             OFFSET = 22.5
-            self.sim_constraints_mode = int((t + OFFSET) / PERIOD) % 3
+            self._sim_constraints = int((t + OFFSET) / PERIOD) % 3
 
     def _rule_gradient(self, t: float) -> None:
         """25 s cycle: 15 s mode 0, 7 s mode 1 or 3 (alternating cycles), 3 s mode 2."""
@@ -351,11 +414,11 @@ class Director:
         phase_t   = t % PERIOD
         cycle_idx = int(t / PERIOD)
         if phase_t < 15.0:
-            self.sim_gradient_mode = 0
+            self._sim_gradient = 0
         elif phase_t < 22.0:
-            self.sim_gradient_mode = 1 if (cycle_idx % 2 == 0) else 3
+            self._sim_gradient = 1 if (cycle_idx % 2 == 0) else 3
         else:
-            self.sim_gradient_mode = 2
+            self._sim_gradient = 2
 
     def _generate_mouse_path(self, now: float, duration: float = 4.0) -> None:
         path_idx = int((now - self._t0) / max(duration, 1e-6)) % len(self._HUMAN_PATHS)

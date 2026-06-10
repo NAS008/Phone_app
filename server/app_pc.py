@@ -51,7 +51,6 @@ from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera, Mic, Mouse, OneEuro
-from gemini import Gemini
 from director import Director
 
 def get_first_part(parts, kind):
@@ -175,11 +174,10 @@ async def main():
     sim_go_back_on = True
     sim_constraints_mode = 0
     sim_gradient_mode = 0
-    sim_depth_factor = 1.0
     img_a = cv2.imread(r"..\..\input\19.png")
     img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
     img_a_hires = super.upscale(img_a)
-    sim.new_image(img_a, depth_factor=sim_depth_factor)
+    sim.new_image(img_a)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
 
     # Raytracer setup
@@ -197,6 +195,7 @@ async def main():
         shadow=config.shadow,
     )
     ray_shape = 0
+    fov_target = config.fov
     frame = img_a.copy()
     frames = deque()
     frames_hires = deque()
@@ -355,7 +354,7 @@ async def main():
         print(f"✓ PC: got a like from {nickname} and sent the current frame {kb} KB")
 
     async def on_settings(params):
-        nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_depth_factor, overlay_on
+        nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, overlay_on, fov_target
         nonlocal img_a, img_a_hires
 
         if 'shape' in params:
@@ -373,7 +372,7 @@ async def main():
         if 'overlay_on' in params:
             overlay_on = bool(params['overlay_on'])
             print(f"✓ PC: overlay set to {overlay_on}")
-            
+
         if 'go_back_on' in params:
             sim_go_back_on = bool(params['go_back_on'])
             print(f"✓ PC: sim go back set to {sim_go_back_on}")
@@ -387,31 +386,23 @@ async def main():
             print(f"✓ PC: sim gradient set to {sim_gradient_mode}")
 
         if 'zoom' in params:
-            ray.fov = float(params['zoom'])
-            print(f"✓ PC: ray zoom set to {ray.fov:.1f}")
+            fov_target = float(params['zoom'])
+            if not director.enabled:
+                ray.fov = fov_target
+            print(f"✓ PC: ray zoom target set to {fov_target:.1f}")
 
-        if 'depth_factor' in params:
-            sim_depth_factor = float(params['depth_factor'])
-            print(f"✓ PC: sim depth factor set to {sim_depth_factor:.2f}")
-
-        if 'auto_play' in params:
-            if bool(params['auto_play']):
-                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode)
-                director.enable()
-                await bus.publish_settings(auto_play=True)
-            else:
-                ray_shape = director.ray_shape
-                sim_go_back_on = director.sim_go_back
-                sim_constraints_mode = director.sim_constraints_mode
-                sim_gradient_mode = director.sim_gradient_mode
+        if 'director_mode' in params:
+            new_mode = params['director_mode']
+            if new_mode == 'auto_play' and director.mode != 'auto_play':
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, ray.fov)
+                director.enable_auto_play()
+                await bus.publish_settings(director_mode='auto_play')
+            elif new_mode == 'auto_gen' and director.mode != 'auto_gen':
+                director.enable_auto_gen()
+                await bus.publish_settings(director_mode='auto_gen')
+            elif new_mode == 'user' and director.enabled:
+                # Director.disable() publishes the full state snapshot itself
                 director.disable()
-                await bus.publish_settings(
-                    auto_play=False,
-                    shape=ray_shape,
-                    go_back_on=sim_go_back_on,
-                    constraints_mode=sim_constraints_mode,
-                    gradient_mode=sim_gradient_mode,
-                )
 
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
@@ -474,16 +465,14 @@ async def main():
     await bus.publish_session(session_id=session.session_id)
     qr_img = session.generate_qr_code()
 
-    # Director
-    gemini_pc = Gemini(
-        GEMINI_API_KEY=config.GEMINI_API_KEY,
-        TEXT_MODEL=config.GEMINI_TEXT_MODEL,
-        IMAGE_MODEL=config.GEMINI_IMAGE_MODEL,
+    # Director — routes virtual mouse moves through the same Mouse callback as real input
+    director = Director(
+        bus, config,
+        mouse_move_fn=lambda px, py: mouse.callback(cv2.EVENT_MOUSEMOVE, px, py, 0, None),
+        session_getter=lambda: session.session_id,
     )
-    director = Director(bus, gemini_pc, config, ray, sim, lambda: session.session_id)
-    director.ray_fov = config.fov
     director.start()
-    director.enable()
+    director.enable_auto_play()
 
     # Time cadence
     ray_period = 1.0 / config.FPS
@@ -496,28 +485,19 @@ async def main():
 
         if director.enabled:
             director.tick(now)
-            sim_go_back_on        = director.sim_go_back
-            sim_constraints_mode  = director.sim_constraints_mode
-            sim_gradient_mode     = director.sim_gradient_mode
-            prev_ray_shape = ray_shape
-            ray_shape             = director.ray_shape
-            if ray_shape != prev_ray_shape:
-                if ray_shape == 5:
-                    start_img = frames[-1] if frames else img_a
-                    img_a_hires = super.upscale(start_img)
-                    print(f"✓ PC: director → flat mode, upscaled image")
-                elif prev_ray_shape == 5:
-                    start_img = frames_hires[-1] if frames_hires else img_a_hires
-                    img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-                    print(f"✓ PC: director → 3-D mode, downscaled image")
-            ray.fov              += (director.ray_fov - ray.fov) * 0.1
+            # Settings changes (shape, go_back, constraints, gradient, zoom) arrive via
+            # on_settings() after Director publishes them to the bus.  Only per-frame
+            # mouse state and the fov lerp are applied directly here.
+            ray.fov += (fov_target - ray.fov) * 0.1
 
         sim_step_count = 0
         while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
             # UI
             if director.enabled:
                 if director.ms_on:
-                    sim.inject_mouse(director.ms_pos, director.ms_vel)
+                    pos = mouse.pos.copy()
+                    pos[2] = sim.h + sim.r
+                    sim.inject_mouse(pos, mouse.vel)
             else:
                 if cam is not None:
                     if cam.update(now):
@@ -557,7 +537,7 @@ async def main():
         else:
             if frames:
                 img_a = frames.popleft()
-                sim.new_image(img_a, depth_factor=sim_depth_factor)
+                sim.new_image(img_a)
 
         # Raytrace
         if ray_shape == 0:
@@ -589,23 +569,17 @@ async def main():
         if key in (ord('q'), 27):
             break
         elif key == ord('d'):
-            if director.enabled:
-                ray_shape = director.ray_shape
-                sim_go_back_on = director.sim_go_back
-                sim_constraints_mode = director.sim_constraints_mode
-                sim_gradient_mode = director.sim_gradient_mode
+            current_mode = director.mode  # None | "auto_play" | "auto_gen"
+            if current_mode is None:
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, ray.fov)
+                director.enable_auto_play()
+                await bus.publish_settings(director_mode='auto_play')
+            elif current_mode == "auto_play":
+                director.enable_auto_gen()
+                await bus.publish_settings(director_mode='auto_gen')
+            else:  # auto_gen → user
+                # Director.disable() publishes the full state snapshot itself
                 director.disable()
-                await bus.publish_settings(
-                    auto_play=False,
-                    shape=ray_shape,
-                    go_back_on=sim_go_back_on,
-                    constraints_mode=sim_constraints_mode,
-                    gradient_mode=sim_gradient_mode,
-                )
-            else:
-                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode)
-                director.enable()
-                await bus.publish_settings(auto_play=True)
 
     cv2.destroyAllWindows()
     if cam is not None:

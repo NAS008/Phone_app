@@ -26,7 +26,7 @@ from config import Config
 from bus import Bus
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from gemini import Gemini, GeminiBlockedError
-from sd35 import StableDiffusion, AnimateDiff
+from sd35 import StableDiffusion, AnimateDiff, Folder
 
 def extract_first_text(parts):
     for part in parts or []:
@@ -87,6 +87,14 @@ async def main():
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     _sd = None
     _ad = None
+    _folder = None
+
+    def get_folder():
+        nonlocal _folder
+        if _folder is None:
+            _folder = Folder(image_size=config.IMAGE_SIZE, input_folder=config.INPUT_FOLDER)
+            print(f"✓ Server: Folder ready ({len(_folder.paths)} images)")
+        return _folder
 
     def get_sd():
         nonlocal _sd
@@ -167,15 +175,31 @@ async def main():
 
         effective_session_id = session_id if str(session_id) == config.ADMIN_SESSION_ID else (current_session_id or session_id)
 
+        turn_id = payload.get("turn_id")
+
         if not parts:
-            print("✗ Server: empty parts")
+            # ── Pick from folder ─────────────────────────────────────────────
+            img_bgr = await loop.run_in_executor(executor, lambda: get_folder().load_image())
+            last_generated_image_bgr = img_bgr
+            image_bytes = bgr_to_jpeg(img_bgr)
+            print(f"✓ Server: picked image from folder ({len(image_bytes) // 1024} KB)")
+            await bus.publish_ai_message_to_pc(
+                session_id=effective_session_id, nickname="NonCarbon Artist",
+                image_bytes=image_bytes, image_mime_type="image/jpeg",
+                image_purpose="output", turn_id=turn_id,
+            )
+            await bus.publish_ai_message_to_phone(
+                session_id=effective_session_id, nickname="NonCarbon Artist",
+                text="From the archive!",
+                image_bytes=image_bytes, image_mime_type="image/jpeg",
+                image_purpose="output", turn_id=turn_id,
+            )
             return
 
         session_key = str(effective_session_id)
         history = session_histories.setdefault(session_key, [])
         saved = pending_parts.pop(session_key, [])
         effective_parts = saved + parts if saved else parts
-        turn_id = payload.get("turn_id")
 
         # ── Mode 2: AnimateDiff ──────────────────────────────────────────────
         if ai_mode == 2:

@@ -314,12 +314,11 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [settingsStyle, setSettingsStyle] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
   const [settingsZoom, setSettingsZoom] = useState(1.0);
-  const [settingsDepthFactor, setSettingsDepthFactor] = useState(1.0);
-  const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
+const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientMode, setSettingsGradientMode] = useState(0);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
-  const [settingsAutoPlay, setSettingsAutoPlay] = useState(true);
+  const [settingsDirectorMode, setSettingsDirectorMode] = useState("auto_play");
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const audioInputRef = useRef(null);
@@ -577,21 +576,28 @@ const appendFeed = useCallback((message) => {
     };
   }, [appendFeed, sessionId]);
 
+  const applyFetchedSettings = useCallback((s) => {
+    if (s.mode !== undefined)              setSettingsMode(Number(s.mode));
+    if (s.style_index !== undefined)       setSettingsStyle(Number(s.style_index));
+    if (s.shape !== undefined)             setSettingsShape(Number(s.shape));
+    if (s.zoom !== undefined)              setSettingsZoom(Number(s.zoom));
+    if (s.constraints_mode !== undefined)  setSettingsConstraintsMode(Number(s.constraints_mode));
+    if (s.gradient_mode !== undefined)     setSettingsGradientMode(Number(s.gradient_mode));
+    if (s.go_back_on !== undefined)        setSettingsGoBackOn(Boolean(s.go_back_on));
+    if (s.overlay_on !== undefined)        setSettingsOverlayOn(Boolean(s.overlay_on));
+    if (s.director_mode !== undefined)     setSettingsDirectorMode(String(s.director_mode));
+  }, []);
+
   useEffect(() => {
     if (!sessionId) return;
-    MessageBusService.fetchSettings().then((s) => {
-      if (s.mode !== undefined)              setSettingsMode(Number(s.mode));
-      if (s.style_index !== undefined)       setSettingsStyle(Number(s.style_index));
-      if (s.shape !== undefined)             setSettingsShape(Number(s.shape));
-      if (s.zoom !== undefined)              setSettingsZoom(Number(s.zoom));
-      if (s.depth_factor !== undefined)      setSettingsDepthFactor(Number(s.depth_factor));
-      if (s.constraints_mode !== undefined)  setSettingsConstraintsMode(Number(s.constraints_mode));
-      if (s.gradient_mode !== undefined)     setSettingsGradientMode(Number(s.gradient_mode));
-      if (s.go_back_on !== undefined)        setSettingsGoBackOn(Boolean(s.go_back_on));
-      if (s.overlay_on !== undefined)        setSettingsOverlayOn(Boolean(s.overlay_on));
-      if (s.auto_play !== undefined)         setSettingsAutoPlay(Boolean(s.auto_play));
-    });
-  }, [sessionId]);
+    MessageBusService.fetchSettings().then(applyFetchedSettings);
+  }, [applyFetchedSettings, sessionId]);
+
+  // Re-fetch when the settings panel opens so it always reflects the latest director state
+  useEffect(() => {
+    if (!isSettingsPanelOpen || !sessionId) return;
+    MessageBusService.fetchSettings().then(applyFetchedSettings);
+  }, [applyFetchedSettings, isSettingsPanelOpen, sessionId]);
 
 
   const stopMediaStream = useCallback(() => {
@@ -837,9 +843,9 @@ const appendFeed = useCallback((message) => {
     );
 
     setIsSettingsPanelOpen(false);
-    if (settingsAutoPlay) {
-      setSettingsAutoPlay(false);
-      sendSetting("auto_play", false);
+    if (settingsDirectorMode !== "user") {
+      setSettingsDirectorMode("user");
+      sendSetting("director_mode", "user");
     }
     setIsSubmitting(true);
     try {
@@ -878,7 +884,7 @@ const appendFeed = useCallback((message) => {
     prompt,
     sendSetting,
     sessionId,
-    settingsAutoPlay,
+    settingsDirectorMode,
   ]);
 
   useEffect(() => {
@@ -1134,6 +1140,29 @@ const appendFeed = useCallback((message) => {
       {isAdmin && isSettingsPanelOpen && (
         <section className="settings-panel">
           <div className="settings-inner">
+            <div className="settings-section settings-row">
+              <span className="settings-label">Director</span>
+              <div className="settings-triswitch">
+                {[
+                  { value: "user",      label: "USER"     },
+                  { value: "auto_play", label: "AUTOPLAY" },
+                  { value: "auto_gen",  label: "AUTOGEN"  },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`settings-triswitch__option${settingsDirectorMode === value ? " active" : ""}`}
+                    onClick={() => {
+                      setSettingsDirectorMode(value);
+                      sendSetting("director_mode", value);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="settings-section">
               <div className="settings-row">
                 <span className="settings-label">Style</span>
@@ -1201,9 +1230,9 @@ const appendFeed = useCallback((message) => {
                   sendSetting("shape", v);
                 }}
               >
-                <option value={0}>Quad</option>
+                <option value={0}>Cloth</option>
                 <option value={1}>Prism</option>
-                <option value={2}>Disc</option>
+                <option value={2}>Dust</option>
                 <option value={3}>Thread</option>
                 <option value={4}>Sphere</option>
                 <option value={5}>Flat</option>
@@ -1221,23 +1250,6 @@ const appendFeed = useCallback((message) => {
                   const next = !settingsOverlayOn;
                   setSettingsOverlayOn(next);
                   sendSetting("overlay_on", next);
-                }}
-              >
-                <span className="settings-toggle__thumb" />
-              </button>
-            </div>
-
-            <div className="settings-section settings-row">
-              <span className="settings-label">Auto Play</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settingsAutoPlay}
-                className={`settings-toggle${settingsAutoPlay ? " on" : ""}`}
-                onClick={() => {
-                  const next = !settingsAutoPlay;
-                  setSettingsAutoPlay(next);
-                  sendSetting("auto_play", next);
                 }}
               >
                 <span className="settings-toggle__thumb" />
@@ -1318,24 +1330,6 @@ const appendFeed = useCallback((message) => {
               />
             </div>
 
-            <div className="settings-section">
-              <div className="settings-row">
-                <span className="settings-label">Depth Factor</span>
-                <span className="settings-value">{settingsDepthFactor.toFixed(2)}</span>
-              </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min="0.0"
-                max="1.0"
-                step="0.01"
-                value={settingsDepthFactor}
-                style={{ "--pct": sliderPct(settingsDepthFactor, 0.0, 1.0) }}
-                onChange={(e) => setSettingsDepthFactor(parseFloat(e.target.value))}
-                onMouseUp={(e) => sendSetting("depth_factor", parseFloat(e.target.value))}
-                onTouchEnd={() => sendSetting("depth_factor", settingsDepthFactor)}
-              />
-            </div>
 
           </div>
         </section>

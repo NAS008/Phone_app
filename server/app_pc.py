@@ -174,6 +174,7 @@ async def main():
     sim_go_back_on = True
     sim_constraints_mode = 0
     sim_gradient_mode = 0
+    sim_world_mode = 0
     img_a = cv2.imread(r"..\..\input\19.png")
     img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
     img_a_hires = super.upscale(img_a)
@@ -355,7 +356,7 @@ async def main():
         print(f"✓ PC: got a like from {nickname} and sent the current frame {kb} KB")
 
     async def on_settings(params):
-        nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, overlay_on, fov_target
+        nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
         nonlocal img_a, img_a_hires
 
         if 'shape' in params:
@@ -385,6 +386,10 @@ async def main():
         if 'gradient_mode' in params:
             sim_gradient_mode = int(params['gradient_mode'])
             print(f"✓ PC: sim gradient set to {sim_gradient_mode}")
+
+        if 'world_mode' in params:
+            sim_world_mode = int(params['world_mode'])
+            print(f"✓ PC: sim world set to {sim_world_mode}")
 
         if 'zoom' in params:
             fov_target = float(params['zoom'])
@@ -528,7 +533,8 @@ async def main():
             sim.update_flip(
                 go_back_on=sim_go_back_on,
                 constraints_mode=sim_constraints_mode,
-                gradient_mode=sim_gradient_mode
+                gradient_mode=sim_gradient_mode,
+                world_mode = sim_world_mode, world_center=config.world_center, world_radius=config.world_radius
             )
             sim_step_count += 1
             next_sim_tick += sim_period
@@ -586,7 +592,7 @@ async def main():
         elif key == ord('d'):
             current_mode = director.mode  # None | "auto_play" | "auto_gen"
             if current_mode is None:
-                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, ray.fov)
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, ray.fov)
                 director.enable_auto_play()
                 await bus.publish_settings(director_mode='auto_play')
             elif current_mode == "auto_play":

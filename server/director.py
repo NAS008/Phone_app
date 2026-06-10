@@ -128,11 +128,12 @@ class Director:
         self.ms_on = False
 
         # Settings state — not exposed; changes published via bus.publish_settings()
-        self._ray_shape      = 0
-        self._ray_fov        = getattr(config, "fov", 1.0)
-        self._sim_go_back    = False
+        self._ray_shape       = 0
+        self._ray_fov         = getattr(config, "fov", 1.0)
+        self._sim_go_back     = False
         self._sim_constraints = 0
-        self._sim_gradient   = 0
+        self._sim_gradient    = 0
+        self._sim_world       = 0
 
         # Internal bookkeeping
         self._mouse_path_end    = 0.0
@@ -187,12 +188,13 @@ class Director:
             t.cancel()
         self._tasks = []
 
-    def sync_from_state(self, ray_shape, sim_go_back, constraints_mode, gradient_mode, ray_fov=None):
+    def sync_from_state(self, ray_shape, sim_go_back, constraints_mode, gradient_mode, world_mode, ray_fov=None):
         """Seed internal state from app before enabling so Director continues from current display state."""
         self._ray_shape       = ray_shape
         self._sim_go_back     = sim_go_back
         self._sim_constraints = constraints_mode
         self._sim_gradient    = gradient_mode
+        self._sim_world       = world_mode
         if ray_fov is not None:
             self._ray_fov = ray_fov
 
@@ -208,6 +210,7 @@ class Director:
         prev_go_back     = self._sim_go_back
         prev_constraints = self._sim_constraints
         prev_gradient    = self._sim_gradient
+        prev_world       = self._sim_world
 
         if self._mode == "auto_play":
             t = now - self._t0
@@ -230,6 +233,8 @@ class Director:
             changed['constraints_mode'] = self._sim_constraints
         if self._sim_gradient != prev_gradient:
             changed['gradient_mode'] = self._sim_gradient
+        if self._sim_world != prev_world:
+            changed['world_mode'] = self._sim_world
 
         if changed:
             asyncio.ensure_future(self.bus.publish_settings(**changed))
@@ -255,6 +260,7 @@ class Director:
             return
         self._ray_shape   = 5
         self._sim_go_back = False
+        self._sim_world   = 0
         await self.bus.publish_settings(shape=5, go_back_on=False)
         print("✓ Director: flat mode locked for auto-gen")
 
@@ -304,6 +310,7 @@ class Director:
         await asyncio.sleep(5.0)
         self._ray_shape   = 0
         self._sim_go_back = False
+        self._sim_world   = 0
         await self.bus.publish_settings(shape=0, go_back_on=False)
 
     # ── Display rules ────────────────────────────────────────────────────────────
@@ -362,14 +369,27 @@ class Director:
             return
 
     def _rule_go_back(self, now: float, t: float) -> None:
-        """5 s on when image gen fires; otherwise 40 s off, 2 s on, 5 s off, 3 s on."""
+        """5s on when image gen fires; otherwise 40 s off, 2 s on, 5 s off, 3 s on."""
         if self._image_gen_t is not None and now - self._image_gen_t < 5.0:
             self._sim_go_back = True
+            self._sim_world = 0
             return
         PERIOD  = 50.0
         phase_t = t % PERIOD
-        if phase_t < 40.0:
+        if phase_t < 30.0:
             self._sim_go_back = False
+        elif phase_t < 35.0:
+            self._sim_go_back = False
+            self._sim_world = 1 + int(t % 2)
+        elif phase_t < 37.0:
+            self._sim_go_back = True
+            self._sim_world = 0
+        elif phase_t < 39.0:
+            self._sim_go_back = False
+            self._sim_world = 1 + int(t % 2)
+        elif phase_t < 40.0:
+            self._sim_go_back = False
+            self._sim_world = 0
         elif phase_t < 42.0:
             self._sim_go_back = True
         elif phase_t < 47.0:

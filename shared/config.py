@@ -37,6 +37,8 @@ class Config:
     FPS_SIM = FPS * 2
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
+    world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
+    world_radius = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.4 * GZ / GRID_SIZE]
 
     # UI
     UI_POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"

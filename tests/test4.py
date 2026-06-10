@@ -16,7 +16,6 @@ from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
 from sd35 import Folder
-from director import DirectorSimple
 
 async def main():
     config = Config()
@@ -35,6 +34,7 @@ async def main():
     sim_goback_on = False
     sim_constraints_mode = 0
     sim_gradient_mode = 0
+    sim_world_mode = 0
 
     # Ray tracer setup
     ray = RayTracer(
@@ -69,33 +69,10 @@ async def main():
     ray_frames = 0
     sim_steps = 0
 
-    director = DirectorSimple(ms, ray, sim, folder, config)
-    director_enabled = True
-    director.ray_fov = config.fov
-    director.start() 
-
     while True:
         # Run sim at a bounded multiple of ray FPS
         now = time.perf_counter()
         
-        if director_enabled:
-            director.tick(now)
-
-            ms.on  = director.ms_on
-            ms.pos = director.ms_pos
-            ms.vel = director.ms_vel
-
-            ray.fov += (director.ray_fov - ray.fov) * 0.1
-
-            sim_goback_on        = director.sim_go_back
-            sim_constraints_mode = director.sim_constraints_mode
-            sim_gradient_mode    = director.sim_gradient_mode
-            ray_shape            = director.ray_shape
-
-            if director.new_image_flag:
-                img = folder.load_image()
-                sim.new_image(img, depth_factor=0.25)
-
         sim_step_count = 0
         while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
             if ms.on:
@@ -103,7 +80,8 @@ async def main():
             sim.update_flip(
                 go_back_on=sim_goback_on,
                 constraints_mode=sim_constraints_mode,
-                gradient_mode=sim_gradient_mode
+                gradient_mode=sim_gradient_mode,
+                world_mode = sim_world_mode, world_center=config.world_center, world_radius=config.world_radius
             )
             sim_steps += 1
             sim_step_count += 1
@@ -162,42 +140,40 @@ async def main():
             2,
             cv2.LINE_AA,
         )
-        # p = (int(ms.pos[0] * config.WINDOW_W), int((1.0 - ms.pos[1]) * config.WINDOW_H))
-        # cv2.circle(frame, p, 10, (0, 255, 255), 2)
-        # cv2.line(frame, (p[0], p[1]), (p[0] + int(ms.vel[0] * 0.03), p[1] + int(ms.vel[1] * 0.03)), (0, 255, 255), 2)
 
         cv2.imshow(config.APP_NAME, frame)
 
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):
             break
-        elif key == ord('d'):
-            director_enabled = not director_enabled
-        elif not director_enabled:
-            if key == ord('b'):
-                sim_goback_on = not sim_goback_on
-                print(f"Go back {sim_goback_on}")
-            elif key == ord('c'):
-                sim_constraints_mode += 1
-                if sim_constraints_mode > 2:
-                    sim_constraints_mode = 0
-                print(f"Constraints {sim_constraints_mode}")
-            elif key == ord('g'):
-                sim_gradient_mode += 1
-                if sim_gradient_mode > 3:
-                    sim_gradient_mode = 0
-                print(f"Gradient mode {sim_gradient_mode}")
-            elif key == ord('n'):
-                img = folder.load_image()
-                sim.new_image(img, depth_factor=0.25)
-            elif key == ord('r'):
-                ray_shape += 1
-                if ray_shape > 6:
-                    ray_shape = 0
-            elif key == ord('z'):
-                ray.fov -= 0.1
-                if ray.fov < 0.05:
-                    ray.fov = 1.1
+        if key == ord('b'):
+            sim_goback_on = not sim_goback_on
+            print(f"Go back {sim_goback_on}")
+        elif key == ord('c'):
+            sim_constraints_mode += 1
+            if sim_constraints_mode > 2:
+                sim_constraints_mode = 0
+            print(f"Constraints {sim_constraints_mode}")
+        elif key == ord('g'):
+            sim_gradient_mode += 1
+            if sim_gradient_mode > 3:
+                sim_gradient_mode = 0
+            print(f"Gradient mode {sim_gradient_mode}")
+        elif key == ord('n'):
+            img = folder.load_image()
+            sim.new_image(img, depth_factor=0.25)
+        elif key == ord('r'):
+            ray_shape += 1
+            if ray_shape > 6:
+                ray_shape = 0
+        elif key == ord('s'):
+            sim_world_mode += 1
+            if sim_world_mode > 2:
+                sim_world_mode = 0 
+        elif key == ord('z'):
+            ray.fov -= 0.1
+            if ray.fov < 0.05:
+                ray.fov = 1.1
 
     cv2.destroyAllWindows()
 

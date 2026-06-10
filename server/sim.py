@@ -488,6 +488,174 @@ def k_new_image(
     invmass[tid] = 0.1 + 0.9 * lumc
 
 @wp.kernel
+def k_sphere_boundaries(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_prior: wp.array(dtype=wp.vec3),
+    wc: wp.vec3,
+    wr: wp.vec3,
+    push: float,       # bounded normal correction per step
+    damping: float,    # global displacement damping in [0, 1]
+    swirl: float,      # bounded tangential drift near surface
+    band: float,       # soft band around surface in scaled-space
+    flow_axis: wp.vec3
+):
+    tid = wp.tid()
+
+    p = xyz[tid]
+    p_old = p
+    p_prior = xyz_prior[tid]
+
+    v = p - p_prior
+    d = p - wc
+
+    q = wp.vec3(
+        d[0] / wr[0],
+        d[1] / wr[1],
+        d[2] / wr[2],
+    )
+
+    s = wp.dot(q, q) - 1.0
+
+    g = wp.vec3(
+        2.0 * d[0] / (wr[0] * wr[0]),
+        2.0 * d[1] / (wr[1] * wr[1]),
+        2.0 * d[2] / (wr[2] * wr[2]),
+    )
+
+    g_len = wp.length(g)
+    if g_len > 1.0e-6:
+        n = g / g_len
+
+        alpha = 1.0
+        surface_weight = 1.0
+        if band > 1.0e-6:
+            alpha = wp.min(wp.abs(s) / band, 1.0)
+            surface_weight = 1.0 - alpha
+
+        # one symmetric bounded normal push
+        if s > 0.0:
+            v -= n * (push * alpha)
+        else:
+            v += n * (push * alpha)
+
+        # tangent direction
+        vn = wp.dot(v, n) * n
+        vt = v - vn
+        vt_len = wp.length(vt)
+
+        t = wp.vec3(0.0, 0.0, 0.0)
+        if vt_len > 1.0e-6:
+            t = vt / vt_len
+        else:
+            axis_tan = flow_axis - wp.dot(flow_axis, n) * n
+            axis_tan_len = wp.length(axis_tan)
+
+            if axis_tan_len > 1.0e-6:
+                t = axis_tan / axis_tan_len
+            else:
+                ref = wp.vec3(1.0, 0.0, 0.0)
+                if wp.abs(n[0]) > 0.9:
+                    ref = wp.vec3(0.0, 1.0, 0.0)
+                t = wp.normalize(wp.cross(n, ref))
+
+        # one bounded tangential drift near the boundary
+        v += t * (swirl * surface_weight)
+
+        # one damping knob
+        v *= wp.max(0.0, 1.0 - damping)
+
+    p = p + v
+
+    xyz[tid] = p
+    xyz_prior[tid] = p_old
+
+@wp.kernel
+def k_torus_boundaries(
+    xyz: wp.array(dtype=wp.vec3),
+    xyz_prior: wp.array(dtype=wp.vec3),
+    wc: wp.vec3,
+    torus_axis: wp.vec3,   # should be normalized
+    major_radius: float,   # R
+    minor_radius: float,   # r
+    push: float,           # bounded normal correction per step
+    damping: float,        # global displacement damping in [0, 1]
+    swirl: float,          # bounded tangential drift near surface
+    band: float,           # soft band around torus field
+    flow_axis: wp.vec3
+):
+    tid = wp.tid()
+
+    p = xyz[tid]
+    p_old = p
+    p_prior = xyz_prior[tid]
+
+    v = p - p_prior
+    d = p - wc
+
+    a = torus_axis
+    d_parallel = wp.dot(d, a)
+    d_perp = d - d_parallel * a
+    d_perp_len = wp.length(d_perp)
+
+    # torus implicit field
+    ring_dist = d_perp_len - major_radius
+    s = ring_dist * ring_dist + d_parallel * d_parallel - minor_radius * minor_radius
+
+    # gradient of torus field
+    g = wp.vec3(0.0, 0.0, 0.0)
+
+    if d_perp_len > 1.0e-6:
+        g = 2.0 * ring_dist * (d_perp / d_perp_len) + 2.0 * d_parallel * a
+    else:
+        # on the torus axis, the field is singular for the radial part;
+        # fall back to axial direction
+        g = 2.0 * d_parallel * a
+
+    g_len = wp.length(g)
+    if g_len > 1.0e-6:
+        n = g / g_len
+
+        alpha = 1.0
+        surface_weight = 1.0
+        if band > 1.0e-6:
+            alpha = wp.min(wp.abs(s) / band, 1.0)
+            surface_weight = 1.0 - alpha
+
+        # symmetric bounded push toward torus surface
+        if s > 0.0:
+            v -= n * (push * alpha)
+        else:
+            v += n * (push * alpha)
+
+        # tangent direction
+        vn = wp.dot(v, n) * n
+        vt = v - vn
+        vt_len = wp.length(vt)
+
+        t = wp.vec3(0.0, 0.0, 0.0)
+        if vt_len > 1.0e-6:
+            t = vt / vt_len
+        else:
+            axis_tan = flow_axis - wp.dot(flow_axis, n) * n
+            axis_tan_len = wp.length(axis_tan)
+
+            if axis_tan_len > 1.0e-6:
+                t = axis_tan / axis_tan_len
+            else:
+                ref = wp.vec3(1.0, 0.0, 0.0)
+                if wp.abs(n[0]) > 0.9:
+                    ref = wp.vec3(0.0, 1.0, 0.0)
+                t = wp.normalize(wp.cross(n, ref))
+
+        v += t * (swirl * surface_weight)
+        v *= wp.max(0.0, 1.0 - damping)
+
+    p = p + v
+
+    xyz[tid] = p
+    xyz_prior[tid] = p_old
+
+@wp.kernel
 def k_world_boundaries(
     xyz: wp.array(dtype=wp.vec3), xyz_prior: wp.array(dtype=wp.vec3),
     r: float, h: float, G: wp.vec3i
@@ -925,7 +1093,25 @@ class Simulator:
             self.jacobi
         ], device="cuda")
 
-    def _apply_boundaries(self):
+    def _apply_boundaries(self, world_mode, world_center, world_radius):
+        if world_mode == 1: # spherical
+            wp.launch(k_sphere_boundaries, dim=self.particles, inputs=[
+                self.xyz, self.xyz_prior,
+                wp.vec3(*world_center), wp.vec3(*world_radius),
+                4.0 * self.r, 0.02, 0.5 * self.r, # push, damping, swirl     
+                0.25 * world_radius[0],           # band
+                wp.vec3(0.0, 1.0, 0.0),           # flow axis
+            ], device="cuda")
+        elif world_mode == 2: # torus
+            wp.launch(k_torus_boundaries, dim=self.particles, inputs=[
+                self.xyz, self.xyz_prior,
+                wp.vec3(*world_center), wp.normalize(wp.vec3(0.0, 0.0, 1.0)),  # torus axis
+                0.25, 0.1,                             # major_radius, minor_radius
+                4.0 * self.r, 0.02, 0.5 * self.r,      # push, damping, swirl        
+                0.15,                                  # band
+                wp.vec3(0.0, 1.0, 0.0),                # flow_axis
+            ], device="cuda")
+
         wp.launch(k_world_boundaries, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior,
             self.r, self.h, self.G
@@ -965,7 +1151,10 @@ class Simulator:
         self.v_prev.zero_()
         self.w_prev.zero_()
 
-    def update_flip(self, go_back_on=True, constraints_mode=0, gradient_mode=0):
+    def update_flip(
+        self, go_back_on=True, constraints_mode=0, gradient_mode=0,
+        world_mode=0, world_center=[0.5, 0.5, 0.5], world_radius=[0.4, 0.4, 0.1]
+    ):
         # Grid
         wp.copy(self.u_prior, self.u)
         wp.copy(self.v_prior, self.v)
@@ -998,7 +1187,7 @@ class Simulator:
             ], device="cuda")
 
         self._apply_constraints(mode=constraints_mode)
-        self._apply_boundaries()
+        self._apply_boundaries(world_mode, world_center, world_radius)
 
         # Keep particle velocity consistent with post-correction positions
         wp.launch(k_update_vel_from_positions, dim=self.particles, inputs=[

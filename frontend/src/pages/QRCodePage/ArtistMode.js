@@ -317,6 +317,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
 const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
   const [settingsGoBackOn, setSettingsGoBackOn] = useState(true);
   const [settingsGradientMode, setSettingsGradientMode] = useState(0);
+  const [settingsWorldMode, setSettingsWorldMode] = useState(0);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
   const [settingsDirectorMode, setSettingsDirectorMode] = useState("auto_play");
   const galleryInputRef = useRef(null);
@@ -583,6 +584,7 @@ const appendFeed = useCallback((message) => {
     if (s.zoom !== undefined)              setSettingsZoom(Number(s.zoom));
     if (s.constraints_mode !== undefined)  setSettingsConstraintsMode(Number(s.constraints_mode));
     if (s.gradient_mode !== undefined)     setSettingsGradientMode(Number(s.gradient_mode));
+    if (s.world_mode !== undefined)        setSettingsWorldMode(Number(s.world_mode));
     if (s.go_back_on !== undefined)        setSettingsGoBackOn(Boolean(s.go_back_on));
     if (s.overlay_on !== undefined)        setSettingsOverlayOn(Boolean(s.overlay_on));
     if (s.director_mode !== undefined)     setSettingsDirectorMode(String(s.director_mode));
@@ -1308,6 +1310,25 @@ const appendFeed = useCallback((message) => {
                 onChange={(e) => setSettingsGradientMode(parseInt(e.target.value, 10))}
                 onMouseUp={(e) => sendSetting("gradient_mode", parseInt(e.target.value, 10))}
                 onTouchEnd={() => sendSetting("gradient_mode", settingsGradientMode)}
+              />
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-row">
+                <span className="settings-label">World Mode</span>
+                <span className="settings-value">{settingsWorldMode}</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min="0"
+                max="2"
+                step="1"
+                value={settingsWorldMode}
+                style={{ "--pct": sliderPct(settingsWorldMode, 0, 2) }}
+                onChange={(e) => setSettingsWorldMode(parseInt(e.target.value, 10))}
+                onMouseUp={(e) => sendSetting("world_mode", parseInt(e.target.value, 10))}
+                onTouchEnd={() => sendSetting("world_mode", settingsWorldMode)}
               />
             </div>
 

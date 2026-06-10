@@ -172,6 +172,24 @@ class GifStore:
         with self._lock:
             return self._data
 
+class SettingsStore:
+    """Tracks the last known value of each settings key, merged from all SETTINGS bus messages."""
+    _SKIP = {"session_id", "nickname"}
+
+    def __init__(self):
+        self._state = {}
+        self._lock = threading.Lock()
+
+    def update(self, settings: dict):
+        with self._lock:
+            for k, v in settings.items():
+                if k not in self._SKIP:
+                    self._state[k] = v
+
+    def get(self) -> dict:
+        with self._lock:
+            return dict(self._state)
+
 class MessageBusRequestHandler(BaseHTTPRequestHandler):
     def send_json(self, data, status=200):
         body = json.dumps(data).encode("utf-8")
@@ -243,6 +261,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/styles":
             self.send_json({"names": list(Config.STYLE.keys())})
+            return
+
+        if parsed.path == "/api/settings":
+            self.send_json({"success": True, "settings": self.server.settings_store.get()})
             return
 
         if parsed.path == "/health":
@@ -384,6 +406,7 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         if bus_payload.get("session_id") is not None:
             bus_payload["session_id"] = str(bus_payload["session_id"])
         self.server.bus._publish(Bus.SETTINGS, bus_payload)
+        self.server.settings_store.update(payload)
         self.send_json({"success": True, "result": "settings published"})
 
     def handle_transcribe_audio(self, payload):
@@ -411,15 +434,16 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         return
 
 class AIMessageListener(threading.Thread):
-    def __init__(self, config, store, gif_store):
+    def __init__(self, config, store, gif_store, settings_store):
         super().__init__(daemon=True)
         self.config = config
         self.store = store
         self.gif_store = gif_store
+        self.settings_store = settings_store
         self.stopped = threading.Event()
 
     def run(self):
-        print("✓ Phone listener: thread started, subscribing to AI_MESSAGE_TO_PHONE")
+        print("✓ Phone listener: thread started, subscribing to AI_MESSAGE_TO_PHONE + SETTINGS")
 
         while not self.stopped.is_set():
             client = None
@@ -433,7 +457,7 @@ class AIMessageListener(threading.Thread):
                     decode_responses=False,
                 )
                 pubsub = client.pubsub(ignore_subscribe_messages=True)
-                pubsub.subscribe(Bus.AI_MESSAGE_TO_PHONE)
+                pubsub.subscribe(Bus.AI_MESSAGE_TO_PHONE, Bus.SETTINGS)
                 print("✓ Phone listener: subscribed, waiting for messages...")
 
                 while not self.stopped.is_set():
@@ -443,9 +467,17 @@ class AIMessageListener(threading.Thread):
                     if message.get("type") != "message":
                         continue
 
+                    channel = message.get("channel")
+                    if isinstance(channel, bytes):
+                        channel = channel.decode("utf-8")
+
                     payload = msgpack.unpackb(message["data"], raw=False)
                     if not isinstance(payload, dict):
                         print(f"✗ Phone listener: unexpected payload type {type(payload)}")
+                        continue
+
+                    if channel == Bus.SETTINGS:
+                        self.settings_store.update(payload)
                         continue
 
                     parts = payload.get("parts", [])
@@ -545,7 +577,8 @@ def run_backend(host="0.0.0.0", port=None):
 
     message_store = MessageStore()
     gif_store = GifStore()
-    listener = AIMessageListener(config, message_store, gif_store)
+    settings_store = SettingsStore()
+    listener = AIMessageListener(config, message_store, gif_store, settings_store)
     listener.start()
 
     try:
@@ -559,6 +592,7 @@ def run_backend(host="0.0.0.0", port=None):
     server.bus = bus
     server.message_store = message_store
     server.gif_store = gif_store
+    server.settings_store = settings_store
     server.audio_processor = audio_processor
 
     print(f"✓ Backend bus server running on http://{host}:{port}")

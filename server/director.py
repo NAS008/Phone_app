@@ -188,6 +188,13 @@ class Director:
         self._tasks = []
         print("✓ Director: auto-play stopped")
 
+    def sync_from_state(self, ray_shape, sim_go_back, constraints_mode, gradient_mode):
+        """Seed public state from app before enabling so Director continues from current display state."""
+        self.ray_shape = ray_shape
+        self.sim_go_back = sim_go_back
+        self.sim_constraints_mode = constraints_mode
+        self.sim_gradient_mode = gradient_mode
+
     def start(self):
         """Call once before the main loop to initialise timing."""
         self._t0 = time.perf_counter()
@@ -201,12 +208,10 @@ class Director:
         self._rule_go_back(now, t)
         self._rule_constraints(t)
         self._rule_gradient(t)
-        self._rule_ray_shape(now)   # last so it can override fov_zoom during image gen
 
     # ── Prompt loop ──────────────────────────────────────────────────────────────
 
     async def _prompt_loop(self):
-        await asyncio.sleep(self.config.DIRECTOR_PROMPT_INTERVAL)
         while self._enabled:
             try:
                 await self._generate_and_send_prompt()
@@ -222,6 +227,7 @@ class Director:
             return
 
         theme = random.choice(self._THEMES)
+        print(f"✓ Director: Picked theme {theme}")
         prompt_text = ""
         try:
             response = self.gemini.client.models.generate_content(
@@ -231,13 +237,14 @@ class Director:
             )
             if hasattr(response, "text") and response.text:
                 prompt_text = response.text.strip()
+                print(f"✓ Director: Generated prompt {prompt_text}")
         except Exception as e:
             print(f"✗ Director: Gemini prompt generation failed: {e}")
 
         if not prompt_text:
             prompt_text = theme
 
-        print(f"✓ Director: theme='{theme}' → '{prompt_text[:70]}…'")
+        print(f"✓ Director: theme='{theme}', '{prompt_text[:70]}…'")
         await self.bus.publish_user_message(
             session_id=session_id,
             nickname=self.NICKNAME,
@@ -245,7 +252,17 @@ class Director:
             turn_id=uuid.uuid4().hex,
         )
         self._image_gen_t = time.perf_counter()
-        print(f"✓ Director: image generation triggered — flat mode + go_back for 5 s")
+        await self.bus.publish_settings(go_back_on=True)
+        asyncio.ensure_future(self._activate_flat_mode())
+        print(f"✓ Director: image generation triggered — go_back for 5 s then flat mode")
+
+    async def _activate_flat_mode(self):
+        await asyncio.sleep(5.0)
+        if not self._enabled:
+            return
+        self.ray_shape = 5
+        await self.bus.publish_settings(shape=5)
+        print("✓ Director: flat mode activated — ready for new hires frames")
 
     # ── Display rules ────────────────────────────────────────────────────────────
 
@@ -314,11 +331,6 @@ class Director:
             self.sim_go_back = False
         else:
             self.sim_go_back = True
-
-    def _rule_ray_shape(self, now: float) -> None:
-        """Force shape 5 (flat) for 5 s after image generation is triggered."""
-        if self._image_gen_t is not None and now - self._image_gen_t < 5.0:
-            self.ray_shape = 5
 
     def _rule_constraints(self, t: float) -> None:
         """Shape 0 forces mode 2; shape 3 alternates 1/2; others cycle 0-2."""

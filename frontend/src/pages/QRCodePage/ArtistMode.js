@@ -577,6 +577,22 @@ const appendFeed = useCallback((message) => {
     };
   }, [appendFeed, sessionId]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    MessageBusService.fetchSettings().then((s) => {
+      if (s.mode !== undefined)              setSettingsMode(Number(s.mode));
+      if (s.style_index !== undefined)       setSettingsStyle(Number(s.style_index));
+      if (s.shape !== undefined)             setSettingsShape(Number(s.shape));
+      if (s.zoom !== undefined)              setSettingsZoom(Number(s.zoom));
+      if (s.depth_factor !== undefined)      setSettingsDepthFactor(Number(s.depth_factor));
+      if (s.constraints_mode !== undefined)  setSettingsConstraintsMode(Number(s.constraints_mode));
+      if (s.gradient_mode !== undefined)     setSettingsGradientMode(Number(s.gradient_mode));
+      if (s.go_back_on !== undefined)        setSettingsGoBackOn(Boolean(s.go_back_on));
+      if (s.overlay_on !== undefined)        setSettingsOverlayOn(Boolean(s.overlay_on));
+      if (s.auto_play !== undefined)         setSettingsAutoPlay(Boolean(s.auto_play));
+    });
+  }, [sessionId]);
+
 
   const stopMediaStream = useCallback(() => {
     if (mediaStreamRef.current) {

@@ -196,48 +196,59 @@ async def main():
                 anchor_bgr = last_generated_image_bgr
 
             prompt_text = extract_first_text(effective_parts) or "an artistic scene"
-            idx = random.randrange(len(config.MOTION_LORAS))
-            lora_name, weight, hint, repo = config.MOTION_LORAS[idx]
-            loras = [(repo, lora_name, weight)] if repo else []
             style_suffix = current_style["short"]
-            full_prompt = f"{prompt_text}, {hint}, {style_suffix}" if hint else f"{prompt_text}, {style_suffix}"
-            entry = {
-                "prompt": full_prompt,
-                "negative": "close-up, indoor, blurry, watermark, text",
-                "loras": loras,
-            }
-            anchor_pil = bgr_to_pil(anchor_bgr)
-            print(f"✓ Server: AnimateDiff — prompt='{full_prompt}', lora={lora_name}")
 
-            try:
-                frames = await loop.run_in_executor(executor, lambda: get_ad().generate(entry, anchor_pil))
-            except Exception as e:
-                print(f"✗ Server: AnimateDiff failed: {e}")
-                await _publish_error(effective_session_id, "Animation failed. Please try again.", turn_id)
-                return
+            n_clips = config.CLIPS_PER_SCENE
+            n_loras = len(config.MOTION_LORAS)
+            lora_indices = random.sample(range(n_loras), min(n_clips, n_loras))
+            if n_clips > n_loras:
+                lora_indices += random.choices(range(n_loras), k=n_clips - n_loras)
 
-            if not frames:
-                await _publish_error(effective_session_id, "Animation returned no frames.", turn_id)
-                return
+            clip_anchor_bgr = anchor_bgr
+            for clip_i, lora_idx in enumerate(lora_indices):
+                lora_name, weight, hint, repo = config.MOTION_LORAS[lora_idx]
+                loras = [(repo, lora_name, weight)] if repo else []
+                full_prompt = f"{prompt_text}, {hint}, {style_suffix}" if hint else f"{prompt_text}, {style_suffix}"
+                entry = {
+                    "prompt": full_prompt,
+                    "negative": "close-up, indoor, blurry, watermark, text",
+                    "loras": loras,
+                }
+                clip_anchor_pil = bgr_to_pil(clip_anchor_bgr)
+                print(f"✓ Server: AnimateDiff clip {clip_i + 1}/{n_clips} — prompt='{full_prompt}', lora={lora_name}")
 
-            try:
-                for pil_frame in frames:
-                    frame_bytes = bgr_to_jpeg(pil_to_bgr(pil_frame))
-                    await bus.publish_ai_message_to_pc(
-                        session_id=effective_session_id, nickname="NonCarbon Artist",
-                        image_bytes=frame_bytes, image_mime_type="image/jpeg",
-                        image_purpose="output", turn_id=turn_id,
+                try:
+                    frames = await loop.run_in_executor(
+                        executor, lambda e=entry, a=clip_anchor_pil: get_ad().generate(e, a)
                     )
-                    await asyncio.sleep(1.0 / config.FPS)
-            except Exception as e:
-                print(f"✗ Server: AnimateDiff frame publish failed: {e}")
+                except Exception as e:
+                    print(f"✗ Server: AnimateDiff clip {clip_i + 1} failed: {e}")
+                    await _publish_error(effective_session_id, "Animation failed. Please try again.", turn_id)
+                    return
 
-            last_frame_bgr = pil_to_bgr(frames[-1])
-            last_generated_image_bgr = last_frame_bgr
+                if not frames:
+                    await _publish_error(effective_session_id, "Animation returned no frames.", turn_id)
+                    return
+
+                try:
+                    for pil_frame in frames:
+                        frame_bytes = bgr_to_jpeg(pil_to_bgr(pil_frame))
+                        await bus.publish_ai_message_to_pc(
+                            session_id=effective_session_id, nickname="NonCarbon Artist",
+                            image_bytes=frame_bytes, image_mime_type="image/jpeg",
+                            image_purpose="output", turn_id=turn_id,
+                        )
+                        await asyncio.sleep(1.0 / config.FPS)
+                except Exception as e:
+                    print(f"✗ Server: AnimateDiff frame publish failed: {e}")
+
+                clip_anchor_bgr = pil_to_bgr(frames[-1])
+
+            last_generated_image_bgr = clip_anchor_bgr
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
                 text="Moving!",
-                image_bytes=bgr_to_jpeg(last_frame_bgr), image_mime_type="image/jpeg",
+                image_bytes=bgr_to_jpeg(clip_anchor_bgr), image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
             return
@@ -361,7 +372,14 @@ async def main():
             return
         if "mode" in params:
             ai_mode = int(params["mode"])
-            print(f"✓ Server: ai_mode set to {ai_mode}")
+            ai_mode_txt = ""
+            if ai_mode == 0:
+                ai_mode_txt = "Gemini"
+            elif ai_mode == 1:
+                ai_mode_txt = "Gemini + SD"
+            elif ai_mode == 2:
+                ai_mode_txt = "AnimateDiff"
+            print(f"✓ Server: ai_mode set to {ai_mode_txt}")
         if "style_index" in params:
             idx = int(params["style_index"])
             style_values = list(config.STYLE.values())
@@ -369,6 +387,7 @@ async def main():
                 current_style = style_values[idx]
                 gemini.STYLE = current_style["long"]
                 print(f"✓ Server: style set to '{current_style['name']}'")
+
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)
     bus.on(Bus.USER_MESSAGE, on_user_message)

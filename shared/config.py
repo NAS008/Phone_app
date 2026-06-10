@@ -83,7 +83,7 @@ class Config:
     GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
 
     # Optical flow
-    OF_FRAMES = 3
+    OF_FRAMES = 12
 
     STYLE = {
         "Botanical Lithograph": {
@@ -339,7 +339,7 @@ class Config:
     }
     
     # Director (auto-play)
-    DIRECTOR_PROMPT_INTERVAL = 300    # seconds between AI-generated prompts
+    DIRECTOR_PROMPT_INTERVAL = 30    # seconds between AI-generated prompts
 
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors

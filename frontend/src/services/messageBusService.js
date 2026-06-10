@@ -111,6 +111,17 @@ class MessageBusService {
     }
   }
 
+  async fetchSettings() {
+    try {
+      const response = await fetch(`${this.apiUrl}/api/settings`);
+      if (!response.ok) return {};
+      const { settings } = await response.json();
+      return settings || {};
+    } catch {
+      return {};
+    }
+  }
+
   async fetchServerTime() {
     try {
       const response = await fetch(`${this.apiUrl}/api/server_time`);

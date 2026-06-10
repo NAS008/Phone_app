@@ -21,11 +21,12 @@
 # ✓ Add FLIP fluid
 # ✗ Add collisions
 # ✓ Add world boundaries
+# ✗ Add world round boundaries
 # ✗ Add slime simulation
 # ✓ Fix gradient wind
 # ✓ Fix noise on ellipsoid
-# ✗ Fix detail on prisms with multiple intersect triangles
-# ✗ Fix insert triangle to reduce the number of hit cells
+# ✓ Fix detail on prisms with multiple intersect triangles
+# ✓ Fix insert triangle to reduce the number of hit cells
 
 import cv2
 import io
@@ -358,13 +359,15 @@ async def main():
         nonlocal img_a, img_a_hires
 
         if 'shape' in params:
-            ray_shape = int(params['shape'])
-            if ray_shape == 5:
-                start_img = frames[-1] if frames else img_a
-                img_a_hires = super.upscale(start_img)
-            else:
-                start_img = frames_hires[-1] if frames_hires else img_a_hires
-                img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            new_shape = int(params['shape'])
+            if new_shape != ray_shape:
+                if new_shape == 5:
+                    start_img = frames[-1] if frames else img_a
+                    img_a_hires = super.upscale(start_img)
+                else:
+                    start_img = frames_hires[-1] if frames_hires else img_a_hires
+                    img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            ray_shape = new_shape
             print(f"✓ PC: ray shape set to {ray_shape}")
 
         if 'overlay_on' in params:
@@ -393,9 +396,22 @@ async def main():
 
         if 'auto_play' in params:
             if bool(params['auto_play']):
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode)
                 director.enable()
+                await bus.publish_settings(auto_play=True)
             else:
+                ray_shape = director.ray_shape
+                sim_go_back_on = director.sim_go_back
+                sim_constraints_mode = director.sim_constraints_mode
+                sim_gradient_mode = director.sim_gradient_mode
                 director.disable()
+                await bus.publish_settings(
+                    auto_play=False,
+                    shape=ray_shape,
+                    go_back_on=sim_go_back_on,
+                    constraints_mode=sim_constraints_mode,
+                    gradient_mode=sim_gradient_mode,
+                )
 
     async def on_user_video(session_id, nickname):
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
@@ -574,9 +590,22 @@ async def main():
             break
         elif key == ord('d'):
             if director.enabled:
+                ray_shape = director.ray_shape
+                sim_go_back_on = director.sim_go_back
+                sim_constraints_mode = director.sim_constraints_mode
+                sim_gradient_mode = director.sim_gradient_mode
                 director.disable()
+                await bus.publish_settings(
+                    auto_play=False,
+                    shape=ray_shape,
+                    go_back_on=sim_go_back_on,
+                    constraints_mode=sim_constraints_mode,
+                    gradient_mode=sim_gradient_mode,
+                )
             else:
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode)
                 director.enable()
+                await bus.publish_settings(auto_play=True)
 
     cv2.destroyAllWindows()
     if cam is not None:

@@ -169,6 +169,8 @@ class Director:
             return
         self._cancel_tasks()
         self._mode = "auto_gen"
+        self._ray_shape   = 5
+        asyncio.ensure_future(self.bus.publish_settings(shape=5))
         self._tasks = [asyncio.ensure_future(self._auto_gen_loop())]
         print("✓ Director: auto-gen started")
 
@@ -179,6 +181,7 @@ class Director:
         self._mode = None
         self.ms_on = False
         self._sim_go_back = True
+        asyncio.ensure_future(self.bus.publish_settings(go_back_on=True))
         t = asyncio.ensure_future(self._publish_user_mode())
         self._tasks = [t]  # tracked so a quick re-enable cancels the 5 s wait
         print("✓ Director: stopped")
@@ -376,15 +379,15 @@ class Director:
             return
         PERIOD  = 50.0
         phase_t = t % PERIOD
-        if phase_t < 30.0:
+        if phase_t < 25.0:
             self._sim_go_back = False
-        elif phase_t < 35.0:
+        elif phase_t < 30.0:
             self._sim_go_back = False
             self._sim_world = 1 + int(t % 2)
-        elif phase_t < 37.0:
+        elif phase_t < 35.0:
             self._sim_go_back = True
             self._sim_world = 0
-        elif phase_t < 39.0:
+        elif phase_t < 37.0:
             self._sim_go_back = False
             self._sim_world = 1 + int(t % 2)
         elif phase_t < 40.0:

@@ -1216,6 +1216,7 @@ const appendFeed = useCallback((message) => {
                 <option value={0}>Gemini</option>
                 <option value={1}>Gemini + SD</option>
                 <option value={2}>AnimateDiff</option>
+                <option value={3}>SD</option>
               </select>
             </div>
 

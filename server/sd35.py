@@ -159,6 +159,22 @@ class StableDiffusion:
 
         return latents
    
+    def generate_from_text(self, prompt: str) -> np.ndarray:
+        """Text-to-image with SD3.5. Returns BGR numpy array."""
+        generator = torch.Generator(device=self.DEVICE).manual_seed(self.SEED)
+        result = self.pipe(
+            prompt=prompt,
+            negative_prompt=self.NEGATIVE,
+            num_inference_steps=self.INFERENCE_STEPS,
+            guidance_scale=self.GUIDANCE_SCALE,
+            generator=generator,
+            width=self.IW,
+            height=self.IH,
+        )
+        pil_img = result.images[0]
+        rgb = np.array(pil_img.convert("RGB"))
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
     def generate_between_images(self, image_a_bgr, image_b_bgr, prompt=""):
         latents_a = self.prepare_reference(image_a_bgr)
         latents_b = self.prepare_reference(image_b_bgr)
@@ -171,7 +187,7 @@ class StableDiffusion:
         noise = torch.randn_like(latents_a, generator=generator)
 
         sigma_min = 0.60
-        sigma_max = 0.90
+        sigma_max = 0.98
 
         for i in range(1, self.INFERENCE_STEPS + 1):
             t = i / (self.INFERENCE_STEPS + 1)

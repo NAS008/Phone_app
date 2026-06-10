@@ -277,9 +277,75 @@ async def main():
             )
             return
 
+        # ── Mode 3: SD text-to-image + SD journey ────────────────────────────
+        if ai_mode == 3:
+            user_text_parts = [p for p in effective_parts if p.get("kind") == "text" and p.get("text")]
+            if user_text_parts:
+                history.append({"role": "user", "parts": user_text_parts})
+            if len(history) > config.CONTEXT_SIZE:
+                del history[: len(history) - config.CONTEXT_SIZE]
+
+            prompt_text = extract_first_text(effective_parts) or "an artistic scene"
+            style_suffix = current_style.get("short") or ""
+            sd_prompt = f"{prompt_text}, {style_suffix}" if style_suffix else prompt_text
+
+            print(f"✓ Server: SD text-to-image — '{sd_prompt}'")
+            try:
+                new_bgr = await loop.run_in_executor(
+                    executor, lambda: get_sd().generate_from_text(sd_prompt)
+                )
+            except Exception as e:
+                print(f"✗ Server: SD text-to-image failed: {e}")
+                await _publish_error(effective_session_id, "SD image generation failed. Please try again.", turn_id)
+                return
+
+            new_bgr = cv2.resize(new_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            kb = len(bgr_to_jpeg(new_bgr)) // 1024
+            print(f"✓ Server: SD generated {kb} KB — {prompt_text}")
+
+            prev_bgr = last_generated_image_bgr
+            last_generated_image_bgr = new_bgr
+
+            q = asyncio.Queue()
+
+            def sd_worker():
+                try:
+                    for frame in get_sd().generate_between_images(prev_bgr, new_bgr, style_suffix):
+                        loop.call_soon_threadsafe(q.put_nowait, frame)
+                except Exception as exc:
+                    print(f"✗ Server: SD generate_between_images failed: {exc}")
+                finally:
+                    loop.call_soon_threadsafe(q.put_nowait, None)
+
+            executor.submit(sd_worker)
+            frame_count = 0
+            try:
+                while True:
+                    frame = await q.get()
+                    if frame is None:
+                        break
+                    await bus.publish_ai_message_to_pc(
+                        session_id=effective_session_id, nickname="NonCarbon Artist",
+                        image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
+                        image_purpose="output", turn_id=turn_id,
+                    )
+                    frame_count += 1
+            except Exception as e:
+                print(f"✗ Server: SD frame publish failed: {e}")
+            print(f"✓ Server: SD journey published {frame_count} frames to PC")
+
+            await bus.publish_ai_message_to_phone(
+                session_id=effective_session_id, nickname="NonCarbon Artist",
+                text="Check this!",
+                image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                image_purpose="output", turn_id=turn_id,
+            )
+            return
+
         # ── Modes 0 and 1: Gemini first ──────────────────────────────────────
         try:
-            result = await loop.run_in_executor(executor, lambda: gemini.handle(effective_parts, history))
+            is_director = (nickname == "Director")
+            result = await loop.run_in_executor(executor, lambda: gemini.handle(effective_parts, history, force_generate=is_director))
         except GeminiBlockedError as e:
             print(f"✗ Server: Gemini blocked ({e.reason}): {e.user_message}")
             await _publish_error(effective_session_id, e.user_message, turn_id)
@@ -403,6 +469,8 @@ async def main():
                 ai_mode_txt = "Gemini + SD"
             elif ai_mode == 2:
                 ai_mode_txt = "AnimateDiff"
+            elif ai_mode == 3:
+                ai_mode_txt = "SD"
             print(f"✓ Server: ai_mode set to {ai_mode_txt}")
         if "style_index" in params:
             idx = int(params["style_index"])

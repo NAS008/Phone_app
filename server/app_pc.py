@@ -266,7 +266,9 @@ async def main():
         if img_b is None:
             return {"ok": False, "error": "✗ PC: failed to decode received image"}
 
+        img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
         if ray_shape_value == 5:
+            img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
             img_b_hires = super.upscale(img_b)
             interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
             generated_frames = [interp for interp in (interpolated or []) if interp is not None]
@@ -278,7 +280,6 @@ async def main():
                 "frames": generated_frames,
             }
 
-        img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
         interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
         generated_frames = [interp for interp in (interpolated or []) if interp is not None]
         generated_frames.append(img_b)
@@ -400,7 +401,7 @@ async def main():
         if 'director_mode' in params:
             new_mode = params['director_mode']
             if new_mode == 'auto_play' and director.mode != 'auto_play':
-                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, ray.fov)
+                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, ray.fov)
                 director.enable_auto_play()
                 await bus.publish_settings(director_mode='auto_play')
             elif new_mode == 'auto_gen' and director.mode != 'auto_gen':

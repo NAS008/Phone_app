@@ -66,14 +66,19 @@ class Gemini:
             finish = getattr(candidate, "finish_reason", None)
             finish_name = getattr(finish, "name", str(finish)) if finish is not None else "UNKNOWN"
             content = getattr(candidate, "content", None)
+            text_snippets = []
             for part in getattr(content, "parts", []) or []:
                 inline = getattr(part, "inline_data", None)
                 if inline and getattr(inline, "data", None):
                     return inline.data, None
+                if getattr(part, "text", None):
+                    text_snippets.append(part.text.strip()[:80])
             if finish_name not in ("STOP", "0", "None", "UNKNOWN"):
                 print(f"✗ Gemini: candidate finish_reason={finish_name} — no image produced")
                 if finish_name in _BLOCK_REASONS:
                     return None, finish_name
+            elif text_snippets:
+                print(f"✗ Gemini: text-only response (finish={finish_name}): {' | '.join(text_snippets)}")
         return None, None
 
     def _bus_parts_to_sdk_parts(self, parts: List[Dict[str, Any]]) -> List[Any]:
@@ -203,35 +208,46 @@ class Gemini:
             raise GeminiBlockedError(block_reason, msg)
         return image_bytes
 
-    def handle(self, parts: List[Dict[str, Any]], history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        decision = self.decide(parts, history=history)
+    def handle(self, parts: List[Dict[str, Any]], history: Optional[List[Dict[str, Any]]] = None, force_generate: bool = False) -> Dict[str, Any]:
+        if force_generate:
+            text_parts = [p for p in parts if p.get("kind") == "text" and p.get("text")]
+            prompt = " ".join(p["text"] for p in text_parts).strip() or "generate an image"
+        else:
+            decision = self.decide(parts, history=history)
 
-        if decision["action"] == "ASK_FOLLOWUP":
-            return {
-                "action": "ASK_FOLLOWUP",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": decision["question"],
-                    }
-                ],
-            }
+            if decision["action"] == "ASK_FOLLOWUP":
+                return {
+                    "action": "ASK_FOLLOWUP",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": decision["question"],
+                        }
+                    ],
+                }
+
+            prompt = decision["prompt"]
+
+        # force_generate is Director auto-gen — each prompt is independent, so
+        # passing accumulated chat history confuses the image model into replying
+        # with text ("[Image generated: …]") rather than producing an image.
+        gen_history = None if force_generate else history
 
         image_bytes = None
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 image_bytes = self.generate_image(
-                    prompt=decision["prompt"] + " " + self.STYLE,
+                    prompt=prompt + " " + self.STYLE,
                     parts=parts,
-                    history=history,
+                    history=gen_history,
                 )
             except GeminiBlockedError:
                 raise  # policy block — retrying won't help
             if image_bytes:
                 break
-            if attempt == 0:
-                print("✗ Gemini: no image on attempt 1, retrying in 1s…")
-                time.sleep(1)
+            wait = 2 ** attempt  # 1 s, 2 s
+            print(f"✗ Gemini: no image on attempt {attempt + 1}, retrying in {wait}s…")
+            time.sleep(wait)
 
         if not image_bytes:
             raise ValueError("image generation returned no image")
@@ -246,7 +262,7 @@ class Gemini:
                     "data": image_bytes,
                 }
             ],
-            "prompt": decision["prompt"],
+            "prompt": prompt,
         }
 
     # def describe_image(self, image_path: str, instruction: str) -> str:

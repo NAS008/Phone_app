@@ -201,7 +201,7 @@ async def main():
     frame = img_a.copy()
     frames = deque()
     frames_hires = deque()
-    pending_images = asyncio.Queue(maxsize=8)
+    pending_images = asyncio.Queue(maxsize=16)
     processing_task = None
     processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     thumb_w = max(config.WINDOW_W // 8, 256)
@@ -387,9 +387,21 @@ async def main():
                 if new_shape == 5:
                     start_img = frames[-1] if frames else img_a
                     img_a_hires = super.upscale(start_img)
+                    # Leftover hires frames from a previous flat-mode run would
+                    # play first and the next journey would chain off them.
+                    frames_hires.clear()
                 else:
                     start_img = frames_hires[-1] if frames_hires else img_a_hires
                     img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+                    frames.clear()
+                # In-flight images from the old mode would chain the new run
+                # off stale content — drop them.
+                while not pending_images.empty():
+                    try:
+                        pending_images.get_nowait()
+                        pending_images.task_done()
+                    except asyncio.QueueEmpty:
+                        break
             ray_shape = new_shape
             print(f"✓ PC: ray shape set to {ray_shape}")
 
@@ -631,13 +643,12 @@ async def main():
             last_frames.append(thumb)
             gif_last_frame = thumb
 
+        if frame_bus is not None:
+            frame_bus.publish(frame)
         if overlay_on:
             out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         else:
             out = frame
-        
-        if frame_bus is not None:
-            frame_bus.publish(out)
         cv2.imshow(config.APP_NAME, out)
 
         key = cv2.waitKeyEx(1)

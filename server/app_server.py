@@ -97,6 +97,16 @@ async def main():
             print(f"✓ Server: Folder ready ({len(_folder.paths)} images)")
         return _folder
 
+    def folder_image_or_black():
+        # Seed for journeys: emerge from real artwork instead of darkness.
+        try:
+            return get_folder().load_image()
+        except Exception as e:
+            print(f"✗ Server: folder seed failed, starting from black: {e}")
+            return np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+
+    last_generated_image_bgr = folder_image_or_black()
+
     def get_sd():
         nonlocal _sd
         if _sd is None:
@@ -148,7 +158,7 @@ async def main():
         joined_users.add("Director")   # Director (running on PC) is always a valid sender
         session_histories.clear()
         pending_parts.clear()
-        last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+        last_generated_image_bgr = await loop.run_in_executor(executor, folder_image_or_black)
         last_sd_prompt = ""
         print(f"✓ Server: active session set to {current_session_id}")
 

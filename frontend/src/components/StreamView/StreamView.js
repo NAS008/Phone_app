@@ -94,7 +94,7 @@ const StreamView = ({ sessionId, nickname, onClose }) => {
         onClick={onClose}
         aria-label="Close stream and go back"
       >
-        Close
+        ×
       </button>
     </div>
   );

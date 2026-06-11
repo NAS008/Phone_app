@@ -264,7 +264,7 @@ class Director:
         self._ray_shape   = 5
         self._sim_go_back = False
         self._sim_world   = 0
-        await self.bus.publish_settings(shape=5, go_back_on=False)
+        await self.bus.publish_settings(shape=5, go_back_on=False, world_mode=0)
         print("✓ Director: flat mode locked for auto-gen")
 
         while self._mode == "auto_gen":
@@ -314,7 +314,7 @@ class Director:
         self._ray_shape   = 0
         self._sim_go_back = False
         self._sim_world   = 0
-        await self.bus.publish_settings(shape=0, go_back_on=False)
+        await self.bus.publish_settings(shape=0, go_back_on=False, world_mode=0)
 
     # ── Display rules ────────────────────────────────────────────────────────────
 

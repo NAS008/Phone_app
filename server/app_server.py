@@ -85,6 +85,7 @@ async def main():
     pending_parts = {}
     ai_mode = 0
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+    last_sd_prompt = ""
     _sd = None
     _ad = None
     _folder = None
@@ -141,13 +142,14 @@ async def main():
         )
 
     async def on_session(session_id):
-        nonlocal current_session_id, joined_users, last_generated_image_bgr
+        nonlocal current_session_id, joined_users, last_generated_image_bgr, last_sd_prompt
         current_session_id = str(session_id or "")
         joined_users.clear()
         joined_users.add("Director")   # Director (running on PC) is always a valid sender
         session_histories.clear()
         pending_parts.clear()
         last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+        last_sd_prompt = ""
         print(f"✓ Server: active session set to {current_session_id}")
 
     async def on_user_joined(session_id, nickname):
@@ -160,7 +162,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, current_style
+        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_sd_prompt, current_style
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -181,6 +183,7 @@ async def main():
             # ── Pick from folder ─────────────────────────────────────────────
             img_bgr = await loop.run_in_executor(executor, lambda: get_folder().load_image())
             last_generated_image_bgr = img_bgr
+            last_sd_prompt = ""
             image_bytes = bgr_to_jpeg(img_bgr)
             print(f"✓ Server: picked image from folder ({len(image_bytes) // 1024} KB)")
             await bus.publish_ai_message_to_pc(
@@ -269,6 +272,7 @@ async def main():
                 clip_anchor_bgr = pil_to_bgr(frames[-1])
 
             last_generated_image_bgr = clip_anchor_bgr
+            last_sd_prompt = f"{prompt_text}, {style_suffix}" if style_suffix else prompt_text
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
                 text="Moving!",
@@ -304,13 +308,18 @@ async def main():
             print(f"✓ Server: SD generated {kb} KB — {prompt_text}")
 
             prev_bgr = last_generated_image_bgr
+            prev_prompt = last_sd_prompt
             last_generated_image_bgr = new_bgr
+            last_sd_prompt = sd_prompt
 
             q = asyncio.Queue()
 
             def sd_worker():
                 try:
-                    for frame in get_sd().generate_between_images(prev_bgr, new_bgr, style_suffix):
+                    for frame in get_sd().generate_between_images(
+                        prev_bgr, new_bgr, style_suffix,
+                        prompt_a=prev_prompt, prompt_b=sd_prompt,
+                    ):
                         loop.call_soon_threadsafe(q.put_nowait, frame)
                 except Exception as exc:
                     print(f"✗ Server: SD generate_between_images failed: {exc}")
@@ -405,17 +414,25 @@ async def main():
             # Capture old image and update immediately so any concurrent Director cycle
             # sees the new image as its starting point rather than replaying the same transition.
             prev_bgr = last_generated_image_bgr
+            prev_prompt = last_sd_prompt
+            # Subject first so CLIP truncation only costs trailing style tokens;
+            # T5 (prompt_3) still carries the full text.
+            style_short = current_style.get("short") or ""
+            subject = " ".join(prompt_used.split()[:30])
+            new_prompt = f"{subject}, {style_short}" if style_short else subject
             last_generated_image_bgr = new_bgr
+            last_sd_prompt = new_prompt
 
             if ai_mode == 1:
                 # SD journey: stream each interpolation frame to PC as it's generated.
-                # Use the short style for SD — the long style exceeds the CLIP 77-token limit.
-                sd_prompt = current_style.get("short") or " ".join(prompt_used.split()[:40])
                 q = asyncio.Queue()
 
                 def sd_worker():
                     try:
-                        for frame in get_sd().generate_between_images(prev_bgr, new_bgr, sd_prompt):
+                        for frame in get_sd().generate_between_images(
+                            prev_bgr, new_bgr, style_short,
+                            prompt_a=prev_prompt, prompt_b=new_prompt,
+                        ):
                             loop.call_soon_threadsafe(q.put_nowait, frame)
                     except Exception as exc:
                         print(f"✗ Server: SD generate_between_images failed: {exc}")

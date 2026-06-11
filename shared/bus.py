@@ -14,6 +14,8 @@ class Bus:
     AI_MESSAGE_TO_PC = "ai_message_to_pc"
     AI_MESSAGE_TO_PHONE = "ai_message_to_phone"
     SETTINGS = "settings"
+    WEBRTC_OFFER = "webrtc_offer"
+    WEBRTC_ANSWER = "webrtc_answer"
 
     CHANNELS = (
         SESSION,
@@ -24,6 +26,8 @@ class Bus:
         AI_MESSAGE_TO_PC,
         AI_MESSAGE_TO_PHONE,
         SETTINGS,
+        WEBRTC_OFFER,
+        WEBRTC_ANSWER,
     )
 
     def __init__(self, host, port, password, ssl):
@@ -158,6 +162,22 @@ class Bus:
             payload.update(metadata)
         self._publish(self.SETTINGS, payload)
 
+    async def publish_webrtc_offer(self, offer_id, session_id, nickname, sdp, sdp_type):
+        self._publish(self.WEBRTC_OFFER, {
+            "offer_id": str(offer_id),
+            "session_id": str(session_id),
+            "nickname": nickname,
+            "sdp": sdp,
+            "type": sdp_type,
+        })
+
+    async def publish_webrtc_answer(self, offer_id, sdp, sdp_type):
+        self._publish(self.WEBRTC_ANSWER, {
+            "offer_id": str(offer_id),
+            "sdp": sdp,
+            "type": sdp_type,
+        })
+
     async def _call_handler(self, handler, *args):
         result = handler(*args)
         if inspect.isawaitable(result):
@@ -214,6 +234,9 @@ class Bus:
                 )
 
             elif channel == self.SETTINGS:
+                return await self._call_handler(handler, payload)
+
+            elif channel in (self.WEBRTC_OFFER, self.WEBRTC_ANSWER):
                 return await self._call_handler(handler, payload)
 
         except Exception as e:

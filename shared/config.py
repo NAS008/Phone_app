@@ -11,10 +11,10 @@ class Config:
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 3840, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 2560, 3840#, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
     IMAGE_SIZE = 512
     GRID_SIZE = 128
-    PIXELS_PER_CELL = IMAGE_SIZE // GRID_SIZE
+    PIXELS_PER_CELL = 8#IMAGE_SIZE // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
     if aspect >= 1.0:
         GX = GRID_SIZE
@@ -34,7 +34,7 @@ class Config:
     ambient = 0.6
     shadow = 0.3
     FPS = 12
-    FPS_SIM = FPS * 2
+    FPS_SIM = FPS * 1
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
     world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
@@ -57,6 +57,11 @@ class Config:
     redis_port     = 6380
     redis_password = __import__('os').environ.get('REDIS_PASSWORD', '')
     redis_ssl      = True
+
+    # Streaming
+    stream_on = True
+    HOST_IP = "192.168.68.57"
+    VIEWER_HTML = r"../tests/viewer.html"
 
     # Google
     GEMINI_API_KEY = __import__('os').environ.get('GEMINI_API_KEY', '')

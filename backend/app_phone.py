@@ -17,6 +17,7 @@ import io
 import json
 import threading
 import time
+import uuid
 import msgpack
 import redis
 import urllib.parse
@@ -190,6 +191,35 @@ class SettingsStore:
         with self._lock:
             return dict(self._state)
 
+class WebRtcSignalStore:
+    """Holds pending WebRTC offers until the PC publishes the matching answer on the bus."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pending = {}  # offer_id -> {"event": Event, "answer": dict | None}
+
+    def create(self, offer_id):
+        with self._lock:
+            self._pending[offer_id] = {"event": threading.Event(), "answer": None}
+
+    def resolve(self, offer_id, answer):
+        with self._lock:
+            entry = self._pending.get(offer_id)
+        if entry is None:
+            return
+        entry["answer"] = answer
+        entry["event"].set()
+
+    def wait(self, offer_id, timeout):
+        with self._lock:
+            entry = self._pending.get(offer_id)
+        if entry is None:
+            return None
+        entry["event"].wait(timeout)
+        with self._lock:
+            self._pending.pop(offer_id, None)
+        return entry["answer"]
+
 class MessageBusRequestHandler(BaseHTTPRequestHandler):
     def send_json(self, data, status=200):
         body = json.dumps(data).encode("utf-8")
@@ -328,6 +358,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
                 self.handle_user_video(payload)
                 return
 
+            if parsed.path == "/api/publish/webrtc_offer":
+                self.handle_webrtc_offer(payload)
+                return
+
             self.send_json({"success": False, "error": "Not found"}, status=404)
 
         except Exception as exc:
@@ -358,6 +392,32 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             "nickname": payload.get("nickname"),
         })
         self.send_json({"success": True, "result": "user_video published"})
+
+    def handle_webrtc_offer(self, payload):
+        sdp = payload.get("sdp")
+        sdp_type = payload.get("type")
+        if not sdp or not sdp_type:
+            self.send_json({"success": False, "error": "Missing sdp/type"}, status=400)
+            return
+
+        offer_id = uuid.uuid4().hex
+        self.server.webrtc_signal.create(offer_id)
+        self.server.bus._publish(Bus.WEBRTC_OFFER, {
+            "offer_id": offer_id,
+            "session_id": str(payload.get("session_id") or ""),
+            "nickname": payload.get("nickname"),
+            "sdp": sdp,
+            "type": sdp_type,
+        })
+
+        # Each request runs in its own thread (ThreadingHTTPServer), so block
+        # here until the PC answers over the bus or the wait times out.
+        answer = self.server.webrtc_signal.wait(offer_id, timeout=20.0)
+        if answer is None:
+            self.send_json({"success": False, "error": "Stream is not available"}, status=504)
+            return
+
+        self.send_json({"success": True, "sdp": answer.get("sdp"), "type": answer.get("type")})
 
     def handle_gif_upload(self, parsed):
         params = urllib.parse.parse_qs(parsed.query)
@@ -434,16 +494,17 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
         return
 
 class AIMessageListener(threading.Thread):
-    def __init__(self, config, store, gif_store, settings_store):
+    def __init__(self, config, store, gif_store, settings_store, webrtc_signal):
         super().__init__(daemon=True)
         self.config = config
         self.store = store
         self.gif_store = gif_store
         self.settings_store = settings_store
+        self.webrtc_signal = webrtc_signal
         self.stopped = threading.Event()
 
     def run(self):
-        print("✓ Phone listener: thread started, subscribing to AI_MESSAGE_TO_PHONE + SETTINGS")
+        print("✓ Phone listener: thread started, subscribing to AI_MESSAGE_TO_PHONE + SETTINGS + WEBRTC_ANSWER")
 
         while not self.stopped.is_set():
             client = None
@@ -457,7 +518,7 @@ class AIMessageListener(threading.Thread):
                     decode_responses=False,
                 )
                 pubsub = client.pubsub(ignore_subscribe_messages=True)
-                pubsub.subscribe(Bus.AI_MESSAGE_TO_PHONE, Bus.SETTINGS)
+                pubsub.subscribe(Bus.AI_MESSAGE_TO_PHONE, Bus.SETTINGS, Bus.WEBRTC_ANSWER)
                 print("✓ Phone listener: subscribed, waiting for messages...")
 
                 while not self.stopped.is_set():
@@ -478,6 +539,10 @@ class AIMessageListener(threading.Thread):
 
                     if channel == Bus.SETTINGS:
                         self.settings_store.update(payload)
+                        continue
+
+                    if channel == Bus.WEBRTC_ANSWER:
+                        self.webrtc_signal.resolve(payload.get("offer_id"), payload)
                         continue
 
                     parts = payload.get("parts", [])
@@ -578,7 +643,8 @@ def run_backend(host="0.0.0.0", port=None):
     message_store = MessageStore()
     gif_store = GifStore()
     settings_store = SettingsStore()
-    listener = AIMessageListener(config, message_store, gif_store, settings_store)
+    webrtc_signal = WebRtcSignalStore()
+    listener = AIMessageListener(config, message_store, gif_store, settings_store, webrtc_signal)
     listener.start()
 
     try:
@@ -593,6 +659,7 @@ def run_backend(host="0.0.0.0", port=None):
     server.message_store = message_store
     server.gif_store = gif_store
     server.settings_store = settings_store
+    server.webrtc_signal = webrtc_signal
     server.audio_processor = audio_processor
 
     print(f"✓ Backend bus server running on http://{host}:{port}")

@@ -22,17 +22,36 @@ from pathlib import Path
 import cv2
 import numpy as np
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc import (
+    RTCConfiguration,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+    VideoStreamTrack,
+)
 from av import VideoFrame
 
+STUN_SERVERS = ["stun:stun.l.google.com:19302"]
+
 class FrameBus:
-    def __init__(self):
+    def __init__(self, max_side=1280):
         self._lock = threading.Lock()
         self._frame = None
+        self._max_side = max_side
 
     def publish(self, frame):
         if frame is None:
             return
+        # Downscale once here so every viewer track encodes a stream-sized frame
+        # instead of the full window resolution.
+        h, w = frame.shape[:2]
+        side = max(h, w)
+        if self._max_side > 0 and side > self._max_side:
+            scale = self._max_side / side
+            # Video encoders require even dimensions (yuv420p)
+            new_w = max(2, int(w * scale) // 2 * 2)
+            new_h = max(2, int(h * scale) // 2 * 2)
+            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
         frame = np.ascontiguousarray(frame)
         with self._lock:
             self._frame = frame.copy()
@@ -47,7 +66,13 @@ class CvVideoTrack(VideoStreamTrack):
     def __init__(self, bus, fallback_size=(720, 1280)):
         super().__init__()
         self.bus = bus
-        self.last = np.zeros((fallback_size[0], fallback_size[1], 3), dtype=np.uint8)
+        h, w = fallback_size
+        side = max(h, w)
+        if bus._max_side > 0 and side > bus._max_side:
+            scale = bus._max_side / side
+            h = max(2, int(h * scale) // 2 * 2)
+            w = max(2, int(w * scale) // 2 * 2)
+        self.last = np.zeros((h, w, 3), dtype=np.uint8)
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
@@ -67,22 +92,27 @@ class CvVideoTrack(VideoStreamTrack):
         return frame
 
 class StreamingServer:
-    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080):
+    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8):
         self.frame_bus = frame_bus
         self.W = W
         self.H = H
         self.viewer_html = Path(viewer_html)
         self.host = host
         self.port = port
+        self.max_viewers = max_viewers
         self.pcs = set()
 
     async def viewer(self, request):
         return web.FileResponse(self.viewer_html)
 
-    async def offer(self, request):
-        params = await request.json()
+    async def answer_offer(self, sdp, sdp_type):
+        # Shared by the local LAN viewer route and bus-relayed offers from the webapp
+        if len(self.pcs) >= self.max_viewers:
+            raise RuntimeError(f"viewer limit reached ({self.max_viewers})")
 
-        pc = RTCPeerConnection()
+        pc = RTCPeerConnection(
+            RTCConfiguration(iceServers=[RTCIceServer(urls=STUN_SERVERS)])
+        )
         self.pcs.add(pc)
 
         @pc.on("connectionstatechange")
@@ -98,15 +128,23 @@ class StreamingServer:
         )
         pc.addTrack(track)
 
-        offer_desc = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+        offer_desc = RTCSessionDescription(sdp=sdp, type=sdp_type)
         await pc.setRemoteDescription(offer_desc)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        return web.json_response({
+        return {
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type,
-        })
+        }
+
+    async def offer(self, request):
+        params = await request.json()
+        try:
+            answer = await self.answer_offer(params["sdp"], params["type"])
+        except RuntimeError as exc:
+            return web.json_response({"error": str(exc)}, status=503)
+        return web.json_response(answer)
 
     async def on_shutdown(self, app):
         coros = [pc.close() for pc in self.pcs]

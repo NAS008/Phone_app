@@ -92,6 +92,19 @@ class MessageBusService {
     });
   }
 
+  /**
+   * Relay a WebRTC SDP offer to the PC over the bus and wait for its answer.
+   * Returns { success, sdp, type } — the PC's SDP answer for the live stream.
+   */
+  async sendWebRtcOffer(sessionId, nickname, { sdp, type }) {
+    return this.postMsgpack("/api/publish/webrtc_offer", {
+      session_id: String(sessionId),
+      nickname: String(nickname),
+      sdp,
+      type,
+    });
+  }
+
   // ── Polling ────────────────────────────────────────────────────────────────
 
   /**

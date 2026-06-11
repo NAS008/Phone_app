@@ -50,8 +50,9 @@ from session import Session
 from ray import RayTracer
 from sd35 import OpticalFlow, SuperResolution
 from sim import Simulator
-from ui import Camera, Mic, Mouse, OneEuro
+from ui import Camera, Mic, Mouse
 from director import Director
+from stream import FrameBus, StreamingServer
 
 def get_first_part(parts, kind):
     for part in parts or []:
@@ -234,6 +235,26 @@ async def main():
 
     mouse = Mouse(dt=1.0 / config.FPS_SIM, width=config.WINDOW_W, height=config.WINDOW_H)
     cv2.setMouseCallback(config.APP_NAME, mouse.callback)
+
+    frame_bus = None
+    streaming = None
+    runner = None
+    if config.stream_on:
+        frame_bus = FrameBus()
+        streaming = StreamingServer(
+            frame_bus=frame_bus,
+            W=config.WINDOW_W,
+            H=config.WINDOW_H,
+            viewer_html=config.VIEWER_HTML,
+            host=config.HOST_IP,
+            port=8080,
+        )
+        # The LAN viewer is a debug convenience — webapp viewers connect via
+        # bus-relayed signaling, which works even if this bind fails.
+        try:
+            runner = await streaming.start()
+        except OSError as exc:
+            print(f"⚠ PC: local viewer server failed to bind {config.HOST_IP}:8080 — {exc}")
 
     # Bus setup
     bus = Bus(config.redis_host, config.redis_port, config.redis_password, config.redis_ssl)
@@ -474,11 +495,40 @@ async def main():
             await bus.publish_settings(overlay_on=False)
             print(f"✓ PC: overlay hidden — max users ({config.MAX_USERS}) reached")
 
+    async def on_webrtc_offer(payload):
+        session_id = str(payload.get("session_id") or "")
+        if session_id != str(session.session_id) and session_id != config.ADMIN_SESSION_ID:
+            return
+        offer_id = payload.get("offer_id")
+        sdp = payload.get("sdp")
+        sdp_type = payload.get("type")
+        if not offer_id or not sdp or not sdp_type:
+            return
+
+        nickname = payload.get("nickname") or "viewer"
+
+        async def answer_task():
+            try:
+                answer = await streaming.answer_offer(sdp, sdp_type)
+                await bus.publish_webrtc_answer(
+                    offer_id=offer_id,
+                    sdp=answer["sdp"],
+                    sdp_type=answer["type"],
+                )
+                print(f"✓ PC: webrtc answer sent to {nickname} ({len(streaming.pcs)} viewers)")
+            except Exception as exc:
+                print(f"✗ PC: webrtc offer from {nickname} failed — {exc}")
+
+        # ICE gathering takes a moment; don't block the render loop on it
+        asyncio.create_task(answer_task())
+
     bus.on(Bus.AI_MESSAGE_TO_PC, on_ai_message)
     bus.on(Bus.USER_JOINED, on_user_joined)
     bus.on(Bus.USER_LIKE, on_user_like)
     bus.on(Bus.USER_VIDEO, on_user_video)
     bus.on(Bus.SETTINGS, on_settings)
+    if streaming is not None:
+        bus.on(Bus.WEBRTC_OFFER, on_webrtc_offer)
 
     # Session setup
     session = Session(config.URL)
@@ -585,6 +635,9 @@ async def main():
             out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         else:
             out = frame
+        
+        if frame_bus is not None:
+            frame_bus.publish(out)
         cv2.imshow(config.APP_NAME, out)
 
         key = cv2.waitKeyEx(1)
@@ -604,6 +657,10 @@ async def main():
                 director.disable()
 
     cv2.destroyAllWindows()
+    if streaming is not None:
+        await streaming.on_shutdown(None)
+    if runner is not None:
+        await runner.cleanup()
     if cam is not None:
         cam.close()
     if mic is not None:

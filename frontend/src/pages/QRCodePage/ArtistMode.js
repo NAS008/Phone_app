@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./ArtistMode.css";
 import MessageBusService from "../../services/messageBusService";
+import { StreamView } from "../../components";
 import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
 const buildId = (prefix) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -310,6 +311,7 @@ const ArtistMode = ({ sessionId, nickname, isAdmin }) => {
   const [isLikePulsing, setIsLikePulsing] = useState(false);
   const [isVideoRequesting, setIsVideoRequesting] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [isStreamOpen, setIsStreamOpen] = useState(false);
   const [settingsMode, setSettingsMode] = useState(0);
   const [settingsStyle, setSettingsStyle] = useState(0);
   const [settingsShape, setSettingsShape] = useState(0);
@@ -981,6 +983,18 @@ const appendFeed = useCallback((message) => {
     return "";
   }, [audioWidgetDisplayText, audioWidgetPhase, audioWidgetText, recordingSeconds]);
 
+  if (isStreamOpen) {
+    return (
+      <div className="artist-mode">
+        <StreamView
+          sessionId={sessionId}
+          nickname={nickname}
+          onClose={() => setIsStreamOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="artist-mode">
       {notice && (
@@ -989,7 +1003,16 @@ const appendFeed = useCallback((message) => {
         </div>
       )}
 
-      <header className="assistant-header">
+      <header
+        className="assistant-header"
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsStreamOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") setIsStreamOpen(true);
+        }}
+        aria-label="Open live artwork stream"
+      >
         <div className="assistant-brand-mark" aria-hidden="true">
           <img
             src={officialLogo}

@@ -184,35 +184,28 @@ class StableDiffusion:
         gen = torch.Generator(device=self.DEVICE).manual_seed(seed)
         return torch.randn(like.shape, generator=gen, device=like.device, dtype=like.dtype)
 
+    # prompt_a/prompt_b are accepted for call-site compatibility; only `prompt`
+    # steers the journey.
     def generate_between_images(self, image_a_bgr, image_b_bgr, prompt="", prompt_a=None, prompt_b=None):
         latents_a = self.prepare_reference(image_a_bgr)
         latents_b = self.prepare_reference(image_b_bgr)
 
-        prompt_a = prompt_a or prompt
-        prompt_b = prompt_b or prompt
-        embeds_a, negative_embeds, pooled_a, negative_pooled = self.encode_prompt(prompt_a)
-        if prompt_b == prompt_a:
-            embeds_b, pooled_b = embeds_a, pooled_a
-        else:
-            embeds_b, _, pooled_b, _ = self.encode_prompt(prompt_b)
+        prompt_embeds, negative_embeds, pooled_embeds, negative_pooled = self.encode_prompt(prompt)
+        embeds = torch.cat([negative_embeds, prompt_embeds], dim=0)
+        pooled = torch.cat([negative_pooled, pooled_embeds], dim=0)
 
         noise_a = self._noise_for(image_a_bgr, latents_a)
         noise_b = self._noise_for(image_b_bgr, latents_b)
 
         sigma_min = 0.60
-        sigma_max = 0.90  # below 1.0 so the slerped endpoints still bias the midpoint
+        sigma_max = 1.0
 
         for i in range(1, self.INFERENCE_STEPS + 1):
             t = i / (self.INFERENCE_STEPS + 1)
-            alpha = float(0.5 - 0.5 * np.cos(np.pi * t))
+            alpha = 0.5 - 0.5 * np.cos(np.pi * t)
             sigma = sigma_min + (sigma_max - sigma_min) * (1.0 - (2.0 * alpha - 1.0) ** 2)
             base_latents = self.slerp(latents_a, latents_b, alpha)
             noise = self.slerp(noise_a, noise_b, alpha)
-            # lerp (not slerp) for text embeddings: per-token norms aren't spherical
-            prompt_embeds = torch.lerp(embeds_a, embeds_b, alpha)
-            pooled_embeds = torch.lerp(pooled_a, pooled_b, alpha)
-            embeds = torch.cat([negative_embeds, prompt_embeds], dim=0)
-            pooled = torch.cat([negative_pooled, pooled_embeds], dim=0)
             latents = self.denoise_from_sigma(base_latents, noise, sigma, embeds, pooled)
             frame = self.decode_latents(latents)
 

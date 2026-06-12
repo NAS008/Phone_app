@@ -712,12 +712,16 @@ class OpticalFlow:
         img0 = torch.nn.functional.pad(img0, padding)
         img1 = torch.nn.functional.pad(img1, padding)
 
-        flow = []
+        # Collect all frames on GPU first, then do one batched PCIe transfer
+        tensors = []
         with torch.no_grad():
             for i in range(1, steps + 1):
-                t = i / steps
-                mid = self.model.inference(img0, img1, t)
-                mid = mid[:, :, :h, :w]
-                mid_np = (mid[0].cpu().numpy().transpose(1, 2, 0) * 255).clip(0, 255).astype(np.uint8)
-                flow.append(cv2.cvtColor(mid_np, cv2.COLOR_RGB2BGR))
+                mid = self.model.inference(img0, img1, i / steps)
+                tensors.append(mid[:, :, :h, :w])
+
+        batch = torch.cat(tensors, 0).cpu().numpy()  # single H2D→D2H transfer
+        flow = []
+        for i in range(steps):
+            frame_np = (batch[i].transpose(1, 2, 0) * 255).clip(0, 255).astype(np.uint8)
+            flow.append(cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR))
         return flow

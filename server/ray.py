@@ -284,33 +284,39 @@ def k_fill_triangle(
                 particle_ids[start + offset] = tid
 
 class Grid:
-    def __init__(self, G):
+    def __init__(self, G, n_particles=0, max_cells_per_particle=27):
         self.G = G
         self.h = 1.0 / max(G.x, G.y)
-        self.N = G.x*G.y*G.z          
-        self.cell_count = wp.zeros(self.N, dtype=int, device='cuda')
-        self.cell_start = wp.zeros(self.N, dtype=int, device='cuda')
+        self.N = G.x*G.y*G.z
+        self.cell_count  = wp.zeros(self.N, dtype=int, device='cuda')
+        self.cell_start  = wp.zeros(self.N, dtype=int, device='cuda')
         self.cell_offset = wp.zeros(self.N, dtype=int, device='cuda')
-        self.particle_ids = None
+        # Pre-allocate particle_ids at worst-case size to avoid per-frame realloc
+        if n_particles > 0:
+            self.particle_ids = wp.zeros(n_particles * max_cells_per_particle, dtype=int, device='cuda')
+        else:
+            self.particle_ids = None
 
     def _build_prefix_sum(self):
-        counts = self.cell_count.numpy()
-        starts = np.empty(self.N, dtype=np.int32)
-        starts[0] = 0
-        np.cumsum(counts[:-1], out=starts[1:])
-        total_entries = int(starts[-1] + counts[-1])
-        self.cell_start = wp.array(starts, dtype=int, device="cuda")
-        if self.particle_ids is None or len(self.particle_ids) < total_entries:
+        # Pure-GPU exclusive prefix scan — no CPU download, no sync stall
+        wp.utils.array_scan(self.cell_count, self.cell_start, inclusive=False)
+        if self.particle_ids is None:
+            # Lazy first-call fallback when n_particles was not provided at construction
+            counts = self.cell_count.numpy()
+            starts = np.empty(self.N, dtype=np.int32)
+            starts[0] = 0
+            np.cumsum(counts[:-1], out=starts[1:])
+            total_entries = int(starts[-1] + counts[-1])
+            self.cell_start = wp.array(starts, dtype=int, device="cuda")
             self.particle_ids = wp.zeros(max(total_entries, 1), dtype=int, device="cuda")
 
     def build(self, n: int, insert_kernel, fill_kernel, insert_args: list, fill_args: list):
         self.cell_count.zero_()
         self.cell_offset.zero_()
+        # All kernels run on the same CUDA stream — no explicit sync needed between them
         wp.launch(insert_kernel, dim=n, inputs=insert_args + [self.h, self.G, self.cell_count], device="cuda")
-        wp.synchronize()
         self._build_prefix_sum()
         wp.launch(fill_kernel,   dim=n, inputs=fill_args   + [self.h, self.G, self.cell_start, self.particle_ids, self.cell_offset], device="cuda")
-        wp.synchronize()
 
 # Sphere
 @wp.func
@@ -1023,6 +1029,46 @@ def normal_ellipsoid(
     return wp.normalize(mat @ grad)
 
 @wp.func
+def intersect_ellipsoid_mat(
+    ro: wp.vec3, rd: wp.vec3,
+    center: wp.vec3,
+    rx: float, ry: float, rz: float,
+    mat: wp.mat33
+) -> float:
+    rt   = wp.transpose(mat)
+    ro_l = rt @ (ro - center)
+    rd_l = rt @ rd
+    iro  = wp.vec3(1.0/rx, 1.0/ry, 1.0/rz)
+    ro_s = wp.cw_mul(ro_l, iro)
+    rd_s = wp.cw_mul(rd_l, iro)
+    a    = wp.dot(rd_s, rd_s)
+    b    = wp.dot(ro_s, rd_s)
+    c    = wp.dot(ro_s, ro_s) - 1.0
+    disc = b * b - a * c
+    if disc < 1e-7:
+        return -1.0
+    if a < 1e-12:
+        return -1.0
+    sq = wp.sqrt(disc)
+    t  = (-b - sq) / a
+    if t < 0.001:
+        t = (-b + sq) / a
+    if t < 0.001:
+        return -1.0
+    return t
+
+@wp.func
+def normal_ellipsoid_mat(
+    hit_pt: wp.vec3, center: wp.vec3,
+    rx: float, ry: float, rz: float,
+    mat: wp.mat33
+) -> wp.vec3:
+    rt    = wp.transpose(mat)
+    local = rt @ (hit_pt - center)
+    grad  = wp.vec3(local[0]/(rx*rx), local[1]/(ry*ry), local[2]/(rz*rz))
+    return wp.normalize(mat @ grad)
+
+@wp.func
 def shadow_ellipsoid(
     xyz: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), rx: float, ry: float, rz: float,
     ray_origin: wp.vec3, ray_dir: wp.vec3, shadow_distance: float,
@@ -1158,6 +1204,7 @@ def raytrace_ellipsoid(
         tdelta_z = h*wp.abs(inv_dir[2])
 
         closest_t = float(1e10); hit_id = int(-1)
+        cached_mat = wp.mat33(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
         for step in range(G.x + G.y + G.z):
             if current_cell[0]<0 or current_cell[0]>=G.x or \
@@ -1170,12 +1217,14 @@ def raytrace_ellipsoid(
             t = float(-1.0)
             for i in range(count):
                 pid = particle_ids[start_idx + i]
-                
-                # SHAPE LINE 1
-                t = intersect_ellipsoid(ray_origin, ray_dir, xyz[pid], rx, ry, rz, rot[pid])
+
+                # SHAPE LINE 1 — compute mat once; cache it when hit_id updates
+                pid_mat = dir_to_mat(rot[pid])
+                t = intersect_ellipsoid_mat(ray_origin, ray_dir, xyz[pid], rx, ry, rz, pid_mat)
 
                 if t > 0.001 and t < closest_t:
                     closest_t = t; hit_id = pid
+                    cached_mat = pid_mat
             if hit_id >= 0 and closest_t < wp.min(tmax_x, wp.min(tmax_y, tmax_z)):
                 break
             if tmax_x < tmax_y:
@@ -1192,8 +1241,8 @@ def raytrace_ellipsoid(
         if hit_id >= 0:
             hit_pt = ray_origin + ray_dir * closest_t
 
-            # SHAPE LINE 2
-            normal = normal_ellipsoid(hit_pt, xyz[hit_id], rx, ry, rz, rot[hit_id])
+            # SHAPE LINE 2 — reuse cached_mat; avoids a second dir_to_mat call
+            normal = normal_ellipsoid_mat(hit_pt, xyz[hit_id], rx, ry, rz, cached_mat)
 
             if wp.dot(normal, ray_dir) > 0.0:
                 normal = -normal
@@ -2492,14 +2541,14 @@ def make_ellipsoid_mesh(radius=0.1, a=1.0, b=1.0, c=1.0, sections=6, stacks=2):
     return mesh_verts, mesh_norms, mesh_tris
 
 class RayTracer:
-    def __init__(self, W=1024, H=1024, G=[128, 128, 32], camera=[0.5, 0.5, 1.0], target=[0.5, 0.5, 0.0], light=[0.5, 1.0, 0.5], fov=1.0, samples=1, background=[0.0, 0.0, 0.0], ambient=0.4, shadow=0.4):
+    def __init__(self, W=1024, H=1024, G=[128, 128, 32], camera=[0.5, 0.5, 1.0], target=[0.5, 0.5, 0.0], light=[0.5, 1.0, 0.5], fov=1.0, samples=1, background=[0.0, 0.0, 0.0], ambient=0.4, shadow=0.4, n_particles=0):
         self.W = W
         self.H = H
         self.img = wp.zeros((H, W, 3), dtype=wp.uint8, device='cuda')
 
         self.G = wp.vec3i(*G)
         self.h = 1.0 / max(self.G.x, self.G.y)
-        self.grid = Grid(self.G)
+        self.grid = Grid(self.G, n_particles=n_particles)
 
         self.camera = wp.vec3(*camera)
         self.target = wp.vec3(*target)

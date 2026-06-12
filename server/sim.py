@@ -1,7 +1,5 @@
 import cv2
-import random
 import numpy as np
-from scipy import ndimage
 import warp as wp
 wp.init()    
 
@@ -94,6 +92,21 @@ def k_solve_pressure(
     j = (wp.tid() // G.x) % G.y
     k = wp.tid() // (G.x*G.y)
     if i < 1 or i >= G.x-1 or j < 1 or j >= G.y-1 or k < 1 or k >= G.z-1:
+        return
+    S = G.x; P = G.x*G.y; idx = i + S*j + P*k
+    p[idx] = (div[idx] + p[idx-1]+p[idx+1] + p[idx-S]+p[idx+S] + p[idx-P]+p[idx+P]) / 6.0
+
+@wp.kernel
+def k_solve_pressure_rb(
+    p: wp.array(dtype=float), div: wp.array(dtype=float),
+    G: wp.vec3i, color: int
+):
+    i = wp.tid() % G.x
+    j = (wp.tid() // G.x) % G.y
+    k = wp.tid() // (G.x*G.y)
+    if i < 1 or i >= G.x-1 or j < 1 or j >= G.y-1 or k < 1 or k >= G.z-1:
+        return
+    if (i + j + k) % 2 != color:
         return
     S = G.x; P = G.x*G.y; idx = i + S*j + P*k
     p[idx] = (div[idx] + p[idx-1]+p[idx+1] + p[idx-S]+p[idx+S] + p[idx-P]+p[idx+P]) / 6.0
@@ -883,10 +896,11 @@ class Simulator:
     def __init__(self,
         IMAGE_SIZE=512, PIXELS_PER_CELL=4,
         G=[128, 128, 32], L=1, smooth=15,
-        gradient_strength=0.1, pressure_steps=10, jacobi=0.1, dt=0.1, flip_alpha=0.95
+        gradient_strength=0.1, pressure_steps=5, jacobi=0.1, dt=0.1, flip_alpha=0.95,
+        num_bands=16
     ):
         self.G = wp.vec3i(*G)
-        self.h = 1.0 / max(self.G.x, self.G.y)    
+        self.h = 1.0 / max(self.G.x, self.G.y)
         self.P = self.G * PIXELS_PER_CELL
         self.r = 0.5 * self.h / PIXELS_PER_CELL
         self.L = L
@@ -901,42 +915,48 @@ class Simulator:
         self.dt0 = dt * float(max(self.G.x, self.G.y, self.G.z))
         self.flip_alpha = flip_alpha
 
-        pos = []
-        n_x, n_y = [], []
-        n_xx, n_yy = [], []
-        n_du, n_dd = [], []
         x0 = self.h + self.r
         y0 = self.h + self.r
         z0 = self.h + self.r
-        spacing = 2.0 * self.r   
+        spacing = 2.0 * self.r
         PX_inner = self.P.x - 2 * PIXELS_PER_CELL
         PY_inner = self.P.y - 2 * PIXELS_PER_CELL
-        particles = 0
-        for k in range(self.L):
-            for j in range(PY_inner):
-                for i in range(PX_inner):
-                    jz = self.r * 0.1 * (random.random() - 0.5)
-                    pos.append([x0 + i * spacing, y0 + j * spacing, z0 + k * 2.0 * self.h + jz])
-                    if i < PX_inner - 1: n_x.append(particles + 1)
-                    else: n_x.append(-1)
-                    if j < PY_inner - 1: n_y.append(particles + PX_inner)
-                    else: n_y.append(-1)
-                    if i < PX_inner - 2: n_xx.append(particles + 2)
-                    else: n_xx.append(-1)
-                    if j < PY_inner - 2: n_yy.append(particles + 2 * PX_inner)
-                    else: n_yy.append(-1)
-                    if i < PX_inner - 1 and j < PY_inner - 1: n_du.append(particles + 1 + PX_inner)
-                    else: n_du.append(-1)
-                    if i < PX_inner - 1 and j > 0: n_dd.append(particles + 1 - PX_inner)
-                    else: n_dd.append(-1)
+        N_layer = PX_inner * PY_inner
 
-                    particles += 1
-        self.particles = len(pos)
+        jj_grid, ii_grid = np.meshgrid(np.arange(PY_inner), np.arange(PX_inner), indexing='ij')
+        linear = jj_grid * PX_inner + ii_grid
+
+        all_pos, all_nx, all_ny, all_nxx, all_nyy, all_ndu, all_ndd = [], [], [], [], [], [], []
+        for k in range(self.L):
+            offset = k * N_layer
+            jz = self.r * 0.1 * (np.random.rand(PY_inner, PX_inner) - 0.5)
+            pos_k = np.stack([
+                x0 + ii_grid * spacing,
+                y0 + jj_grid * spacing,
+                np.full((PY_inner, PX_inner), z0 + k * 2.0 * self.h) + jz,
+            ], axis=-1).reshape(-1, 3).astype(np.float32)
+            all_pos.append(pos_k)
+            lin = linear + offset
+            all_nx.append(np.where(ii_grid < PX_inner - 1, lin + 1, -1).ravel())
+            all_ny.append(np.where(jj_grid < PY_inner - 1, lin + PX_inner, -1).ravel())
+            all_nxx.append(np.where(ii_grid < PX_inner - 2, lin + 2, -1).ravel())
+            all_nyy.append(np.where(jj_grid < PY_inner - 2, lin + 2 * PX_inner, -1).ravel())
+            all_ndu.append(np.where((ii_grid < PX_inner-1) & (jj_grid < PY_inner-1), lin + 1 + PX_inner, -1).ravel())
+            all_ndd.append(np.where((ii_grid < PX_inner-1) & (jj_grid > 0), lin + 1 - PX_inner, -1).ravel())
+
+        pos_np = np.vstack(all_pos)
+        n_x  = np.concatenate(all_nx).astype(np.int32)
+        n_y  = np.concatenate(all_ny).astype(np.int32)
+        n_xx = np.concatenate(all_nxx).astype(np.int32)
+        n_yy = np.concatenate(all_nyy).astype(np.int32)
+        n_du = np.concatenate(all_ndu).astype(np.int32)
+        n_dd = np.concatenate(all_ndd).astype(np.int32)
+        self.particles = len(pos_np)
         # Particle arrays
-        self.xyz = wp.array(pos, dtype=wp.vec3, device="cuda")
-        self.xyz_prior = wp.array(pos, dtype=wp.vec3, device="cuda")
-        self.xyz_goal = wp.array(pos, dtype=wp.vec3, device="cuda")
-        self.xyz_base = wp.array(pos, dtype=wp.vec3, device="cuda")
+        self.xyz = wp.array(pos_np, dtype=wp.vec3, device="cuda")
+        self.xyz_prior = wp.array(pos_np, dtype=wp.vec3, device="cuda")
+        self.xyz_goal = wp.array(pos_np, dtype=wp.vec3, device="cuda")
+        self.xyz_base = wp.array(pos_np, dtype=wp.vec3, device="cuda")
         self.xyz_corr = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.vel = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
         self.rgb = wp.zeros(self.particles, dtype=wp.vec3, device="cuda")
@@ -950,16 +970,16 @@ class Simulator:
         self.next_yy = wp.array(n_yy, dtype=int, device="cuda")
         self.next_du = wp.array(n_du, dtype=int, device="cuda")
         self.next_dd = wp.array(n_dd, dtype=int, device="cuda")
-        # Image buffers
-        self.pixels = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda") 
+        # Image buffers (GPU) — pre-allocated once; reused in new_image() via wp.copy
+        self.pixels  = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda")
         self.blurred = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda")
 
         # Grid arrays
         self.G2 = self.G.x * self.G.y
         self.G3 = self.G.x * self.G.y * self.G.z
-        self.grad_x = wp.zeros(self.G2, dtype=float, device="cuda") 
-        self.grad_y = wp.zeros(self.G2, dtype=float, device="cuda") 
-        self.lum = wp.zeros(self.G2, dtype=float, device="cuda") 
+        self.grad_x = wp.zeros(self.G2, dtype=float, device="cuda")
+        self.grad_y = wp.zeros(self.G2, dtype=float, device="cuda")
+        self.lum = wp.zeros(self.G2, dtype=float, device="cuda")
         self.u      = wp.zeros(self.G3, dtype=float, device="cuda")
         self.v      = wp.zeros(self.G3, dtype=float, device="cuda")
         self.w      = wp.zeros(self.G3, dtype=float, device="cuda")
@@ -973,6 +993,16 @@ class Simulator:
         self.p      = wp.zeros(self.G3, dtype=float, device="cuda")
         self.p2g_weight = wp.zeros(self.G3, dtype=float, device="cuda")
 
+        # CPU staging buffers — pre-allocated once to avoid per-call GPU malloc
+        img_flat = self.IMAGE_SIZE * self.IMAGE_SIZE * 3
+        self._pixels_np  = np.zeros(img_flat, dtype=np.uint8)
+        self._blurred_np = np.zeros(img_flat, dtype=np.uint8)
+        self._grad_x_np  = np.zeros(self.G2, dtype=np.float32)
+        self._grad_y_np  = np.zeros(self.G2, dtype=np.float32)
+        self._lum_np     = np.zeros(self.G2, dtype=np.float32)
+        self._bands_np   = np.zeros(num_bands, dtype=np.float32)
+        self._bands_gpu  = wp.zeros(num_bands, dtype=float, device="cuda")
+
         print(f"✓ SIM: simulator ready")
         print(f"    Image({self.IMAGE_SIZE},{self.IMAGE_SIZE})")
         print(f"    {self.particles:,} particles({PX_inner},{PY_inner},{L})")
@@ -981,13 +1011,11 @@ class Simulator:
     def _compute_gradients(self, img):
         img_grid = cv2.resize(img, (self.G.x, self.G.y), interpolation=cv2.INTER_AREA)
 
-        # Grayscale luminance
         lum = cv2.cvtColor(img_grid, cv2.COLOR_BGR2GRAY)
-        luminance = lum.astype(np.float32) / 255.0  # shape: (GY, GX)
+        luminance = lum.astype(np.float32) / 255.0
 
-        # 2D Sobel gradients
-        grad_x = ndimage.sobel(luminance, axis=1)  # X direction (cols)
-        grad_y = ndimage.sobel(luminance, axis=0)  # Y direction (rows)
+        grad_x = cv2.Sobel(luminance, cv2.CV_32F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(luminance, cv2.CV_32F, 0, 1, ksize=3)
 
         max_mag = np.hypot(grad_x, grad_y).max()
         if max_mag > 0:
@@ -995,14 +1023,13 @@ class Simulator:
             grad_y /= max_mag
 
         # Flip vertically so row 0 = bottom of image (matches GPU grid Y-up convention)
-        grad_x   = np.flipud(grad_x)
-        grad_y   = np.flipud(grad_y)   # also flip gy to stay consistent
-        luminance = np.flipud(luminance)
+        np.copyto(self._grad_x_np, np.ascontiguousarray(np.flipud(grad_x)).ravel())
+        np.copyto(self._grad_y_np, np.ascontiguousarray(np.flipud(grad_y)).ravel())
+        np.copyto(self._lum_np,    np.ascontiguousarray(np.flipud(luminance)).ravel())
 
-        gx  = wp.array(grad_x.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
-        gy  = wp.array(grad_y.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
-        lum = wp.array(luminance.flatten().astype(np.float32), dtype=wp.float32, device="cuda")
-        return gx, gy, lum   
+        wp.copy(self.grad_x, wp.array(self._grad_x_np, dtype=wp.float32, device="cpu"))
+        wp.copy(self.grad_y, wp.array(self._grad_y_np, dtype=wp.float32, device="cpu"))
+        wp.copy(self.lum,    wp.array(self._lum_np,    dtype=wp.float32, device="cpu"))
 
     def new_image(self, img, depth_factor=1.0):
         for arr in [self.u, self.v, self.w,
@@ -1010,10 +1037,14 @@ class Simulator:
                     self.div, self.p]:
             arr.zero_()
 
-        self.pixels = wp.array(np.ascontiguousarray(img).flatten(), dtype=wp.uint8, device="cuda")
+        np.copyto(self._pixels_np, np.ascontiguousarray(img).ravel())
+        wp.copy(self.pixels, wp.array(self._pixels_np, dtype=wp.uint8, device="cpu"))
+
         blurred = cv2.GaussianBlur(img, (self.smooth, self.smooth), 0)
-        self.blurred = wp.array(np.ascontiguousarray(blurred).flatten(), dtype=wp.uint8, device="cuda")
-        self.grad_x, self.grad_y, self.lum = self._compute_gradients(blurred)
+        np.copyto(self._blurred_np, np.ascontiguousarray(blurred).ravel())
+        wp.copy(self.blurred, wp.array(self._blurred_np, dtype=wp.uint8, device="cpu"))
+
+        self._compute_gradients(blurred)
 
         wp.launch(k_new_image, dim=self.particles, inputs=[
             self.pixels, self.blurred, self.IMAGE_SIZE,
@@ -1021,13 +1052,16 @@ class Simulator:
             self.h, self.G, depth_factor
         ], device="cuda")
 
-    def project(self):
+    def project(self, steps=None):
+        if steps is None:
+            steps = self.pressure_steps
         wp.launch(k_divergence, dim=self.G3, inputs=[
             self.div, self.u, self.v, self.w, self.h, self.G
         ], device="cuda")
         self.p.zero_()
-        for _ in range(self.pressure_steps):
-            wp.launch(k_solve_pressure, dim=self.G3, inputs=[self.p, self.div, self.G], device="cuda")
+        for _ in range(steps):
+            wp.launch(k_solve_pressure_rb, dim=self.G3, inputs=[self.p, self.div, self.G, 0], device="cuda")
+            wp.launch(k_solve_pressure_rb, dim=self.G3, inputs=[self.p, self.div, self.G, 1], device="cuda")
         wp.launch(k_subtract_gradient, dim=self.G3, inputs=[self.u, self.v, self.w, self.p, self.h, self.G], device="cuda")
 
     def inject_mouse(self, m, mv):
@@ -1038,15 +1072,13 @@ class Simulator:
         ], device="cuda")
 
     def inject_audio(self, bands, flux):
-        bands = np.asarray(bands, dtype=np.float32)
-        bands = np.clip(bands, 0.0, 1.0)
-        bands = np.sqrt(bands)
-
-        bands_wp = wp.array(bands, dtype=float, device="cuda")
+        np.clip(np.asarray(bands, dtype=np.float32), 0.0, 1.0, out=self._bands_np)
+        np.sqrt(self._bands_np, out=self._bands_np)
+        wp.copy(self._bands_gpu, wp.array(self._bands_np, dtype=float, device="cpu"))
         wp.launch(k_inject_audio_field, dim=self.G3, inputs=[
             self.u_prev, self.v_prev, self.w_prev,
-            bands_wp,
-            int(bands.shape[0]),
+            self._bands_gpu,
+            int(self._bands_np.shape[0]),
             float(flux),
             0.08,
             self.G
@@ -1208,7 +1240,7 @@ class Simulator:
         wp.launch(k_normalize_grid_velocity, dim=self.G3, inputs=[
             self.u, self.v, self.w, self.p2g_weight
         ], device="cuda")
-        self.project()
+        self.project(steps=max(2, self.pressure_steps // 2))
 
         wp.launch(k_update_rotation, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior, self.rot, 0.1 * self.r, 0.1

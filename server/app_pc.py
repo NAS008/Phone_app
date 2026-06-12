@@ -139,6 +139,41 @@ def overlay(frame, overlay_img, proportion=16, alignment="center"):
     out[y0:y0+h, x0:x0+w] = blended.astype(out.dtype)
     return out
 
+def _compute_overlay_state(img, proportion, W, H, alignment):
+    """Pre-compute a resized overlay image and its fixed position."""
+    h_img, w_img = img.shape[:2]
+    ar = float(w_img) / h_img
+    h = max(H // proportion, 100)
+    w = int(h * ar)
+    resized = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+    if alignment == "center":
+        x0 = (W - w) // 2; y0 = (H - h) // 2
+    elif alignment == "bottom center":
+        x0 = (W - w) // 2; y0 = H - h - h // 2
+    elif alignment == "bottom left":
+        x0 = w // 4; y0 = H - h - h // 2
+    elif alignment == "bottom right":
+        x0 = W - w - w // 2; y0 = H - h - h // 2
+    elif alignment == "top center":
+        x0 = (W - w) // 2; y0 = h // 2
+    elif alignment == "top left":
+        x0 = w // 2; y0 = h // 2
+    else:
+        x0 = W - w - w // 2; y0 = h // 2
+    return resized, x0, y0
+
+def overlay_fixed(frame, overlay_img, x0, y0):
+    """Blend a pre-resized overlay at a fixed position (no resize per call)."""
+    out = frame.copy()
+    h, w = overlay_img.shape[:2]
+    region = out[y0:y0+h, x0:x0+w].astype(np.float32)
+    overlay_bgr = overlay_img.astype(np.float32)
+    b = overlay_bgr[:, :, 0]; g = overlay_bgr[:, :, 1]; r = overlay_bgr[:, :, 2]
+    luminance = 0.114 * b + 0.587 * g + 0.299 * r
+    alpha = (luminance / 255.0)[..., None].astype(np.float32)
+    out[y0:y0+h, x0:x0+w] = (overlay_bgr * alpha + region * (1.0 - alpha)).astype(out.dtype)
+    return out
+
 def resize_to_fit_window(img, window_w, window_h):
     target_w = window_w
     target_h = window_h
@@ -183,6 +218,7 @@ async def main():
     img_a_hires = super.upscale(img_a)
     sim.new_image(img_a)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
+    logo_overlay, logo_x0, logo_y0 = _compute_overlay_state(logo, 20, config.WINDOW_W, config.WINDOW_H, "bottom center")
     brand = Brand()
     brand_on = False
     _brand_premul, _brand_inv_alpha = Brand.prepare_blend(
@@ -202,6 +238,7 @@ async def main():
         background=config.background,
         ambient=config.ambient,
         shadow=config.shadow,
+        n_particles=sim.particles,
     )
     ray_shape = 0
     fov_target = config.fov
@@ -384,7 +421,7 @@ async def main():
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
 
-        out = overlay(frame, logo, proportion=20, alignment="bottom center")
+        out = overlay_fixed(frame, logo_overlay, logo_x0, logo_y0)
         image_bytes = get_image_bytes(out)
         await bus.publish_ai_message_to_phone(
             session_id=session_id,
@@ -572,6 +609,7 @@ async def main():
     session.create_session()
     await bus.publish_session(session_id=session.session_id)
     qr_img = session.generate_qr_code()
+    qr_overlay, qr_x0, qr_y0 = _compute_overlay_state(qr_img, 24, config.WINDOW_W, config.WINDOW_H, "bottom left")
 
     # Director — routes virtual mouse moves through the same Mouse callback as real input
     director = Director(
@@ -669,7 +707,7 @@ async def main():
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         gif_changed = (
             gif_last_frame is None or
-            np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > config.GIF_DIFF_THRESHOLD
+            np.mean(np.abs(thumb.astype(np.int16) - gif_last_frame.astype(np.int16))) > config.GIF_DIFF_THRESHOLD
         )
         if gif_changed:
             last_frames.append(thumb)
@@ -678,7 +716,7 @@ async def main():
             frame_bus.publish(frame)
 
         if overlay_on:
-            out = overlay(frame, qr_img, proportion=24, alignment="bottom left")
+            out = overlay_fixed(frame, qr_overlay, qr_x0, qr_y0)
         else:
             out = frame
         cv2.imshow(config.APP_NAME, out)

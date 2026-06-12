@@ -124,6 +124,22 @@ class MessageBusService {
     }
   }
 
+  /**
+   * Fetch short-lived TURN ICE servers (Cloudflare) from the backend.
+   * Returns an iceServers array, or null when TURN is not configured —
+   * the stream then falls back to STUN-only (works on WiFi, not mobile data).
+   */
+  async fetchIceServers() {
+    try {
+      const response = await fetch(`${this.apiUrl}/api/turn_credentials`);
+      if (!response.ok) return null;
+      const { iceServers } = await response.json();
+      return Array.isArray(iceServers) && iceServers.length > 0 ? iceServers : null;
+    } catch {
+      return null;
+    }
+  }
+
   async fetchSettings() {
     try {
       const response = await fetch(`${this.apiUrl}/api/settings`);

@@ -25,8 +25,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from config import Config
 from bus import Bus
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
-from gemini import Gemini, GeminiBlockedError
-from sd35 import StableDiffusion, AnimateDiff, Folder
+from ai import Gemini, GeminiBlockedError, StableDiffusion, AnimateDiff, Folder
 
 def extract_first_text(parts):
     for part in parts or []:

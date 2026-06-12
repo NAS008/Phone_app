@@ -2,7 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import "./StreamView.css";
 import MessageBusService from "../../services/messageBusService";
 
-const waitForIceGathering = (pc, timeoutMs = 2000) =>
+// TURN relay is required on mobile data (CGNAT blocks direct/STUN connections).
+// Cloudflare TURN credentials are short-lived, so they are fetched from the
+// backend per connection; the static REACT_APP_TURN_* vars remain as fallback.
+const buildStaticIceServers = () => {
+  const servers = [{ urls: "stun:stun.l.google.com:19302" }];
+  const turnUrl = process.env.REACT_APP_TURN_URL;
+  if (turnUrl) {
+    servers.push({
+      urls: [`${turnUrl}?transport=udp`, `${turnUrl}?transport=tcp`],
+      username: process.env.REACT_APP_TURN_USERNAME,
+      credential: process.env.REACT_APP_TURN_PASSWORD,
+    });
+  }
+  return servers;
+};
+
+const waitForIceGathering = (pc, timeoutMs = 4000) =>
   new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") {
       resolve();
@@ -30,29 +46,34 @@ const StreamView = ({ sessionId, nickname, onClose }) => {
 
   useEffect(() => {
     let cancelled = false;
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-
-    pc.addTransceiver("video", { direction: "recvonly" });
-
-    pc.ontrack = (event) => {
-      if (cancelled) return;
-      if (videoRef.current) {
-        videoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (cancelled) return;
-      if (pc.connectionState === "connected") {
-        setStatus("");
-      } else if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-        setStatus("Stream unavailable");
-      }
-    };
+    let pc = null;
 
     const start = async () => {
+      const turnServers = await MessageBusService.fetchIceServers();
+      if (cancelled) return;
+
+      pc = new RTCPeerConnection({
+        iceServers: [...buildStaticIceServers(), ...(turnServers || [])],
+      });
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      pc.ontrack = (event) => {
+        if (cancelled) return;
+        if (videoRef.current) {
+          videoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (cancelled) return;
+        if (pc.connectionState === "connected") {
+          setStatus("");
+        } else if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+          setStatus("Stream unavailable");
+        }
+      };
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await waitForIceGathering(pc);
@@ -74,7 +95,7 @@ const StreamView = ({ sessionId, nickname, onClose }) => {
 
     return () => {
       cancelled = true;
-      pc.close();
+      if (pc) pc.close();
     };
   }, [nickname, sessionId]);
 

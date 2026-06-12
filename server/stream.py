@@ -33,6 +33,29 @@ from av import VideoFrame
 
 STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 
+def build_ice_servers(turn_url="", turn_username="", turn_password=""):
+    servers = [RTCIceServer(urls=STUN_SERVERS)]
+    if turn_url:
+        servers.append(
+            RTCIceServer(
+                urls=[f"{turn_url}?transport=udp", f"{turn_url}?transport=tcp"],
+                username=turn_username,
+                credential=turn_password,
+            )
+        )
+    return servers
+
+def ice_servers_from_dicts(entries):
+    # Browser-style [{"urls": [...], "username"?, "credential"?}] → aiortc
+    return [
+        RTCIceServer(
+            urls=entry.get("urls"),
+            username=entry.get("username"),
+            credential=entry.get("credential"),
+        )
+        for entry in entries or []
+    ]
+
 class FrameBus:
     def __init__(self, max_side=1280):
         self._lock = threading.Lock()
@@ -92,7 +115,7 @@ class CvVideoTrack(VideoStreamTrack):
         return frame
 
 class StreamingServer:
-    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8):
+    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None):
         self.frame_bus = frame_bus
         self.W = W
         self.H = H
@@ -100,6 +123,11 @@ class StreamingServer:
         self.host = host
         self.port = port
         self.max_viewers = max_viewers
+        self.ice_servers = ice_servers or build_ice_servers()
+        # Optional callable returning browser-style ice server dicts (e.g.
+        # CloudflareTurn.get_ice_servers). Called per connection because the
+        # credentials are short-lived; may block, so it runs in a thread.
+        self.turn_provider = turn_provider
         self.pcs = set()
 
     async def viewer(self, request):
@@ -110,8 +138,13 @@ class StreamingServer:
         if len(self.pcs) >= self.max_viewers:
             raise RuntimeError(f"viewer limit reached ({self.max_viewers})")
 
+        ice_servers = list(self.ice_servers)
+        if self.turn_provider:
+            extra = await asyncio.to_thread(self.turn_provider)
+            ice_servers += ice_servers_from_dicts(extra)
+
         pc = RTCPeerConnection(
-            RTCConfiguration(iceServers=[RTCIceServer(urls=STUN_SERVERS)])
+            RTCConfiguration(iceServers=ice_servers)
         )
         self.pcs.add(pc)
 

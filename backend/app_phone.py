@@ -23,13 +23,16 @@ import redis
 import urllib.parse
 import sys as _sys, os as _os
 from PIL import Image
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from google import genai
 from google.genai import types
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
+from turn import CloudflareTurn
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
+from ai import Gemini
 
 def _now_ms():
     return int(time.time() * 1000)
@@ -116,6 +119,8 @@ def _extract_text_from_parts(parts):
             chunks.append(part["text"])
     return "\n".join(chunks).strip() if chunks else None
 
+# !!!!!!!!!!!!!
+# Test to see if it can be removed and used from ai.py instead ti have all ai in same place
 class AudioProcessor:
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         self.client = genai.Client(api_key=api_key)
@@ -295,6 +300,13 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/settings":
             self.send_json({"success": True, "settings": self.server.settings_store.get()})
+            return
+
+        if parsed.path == "/api/turn_credentials":
+            # Short-lived Cloudflare TURN credentials for the webapp's
+            # RTCPeerConnection; empty list when TURN is not configured.
+            servers = self.server.cloudflare_turn.get_ice_servers()
+            self.send_json({"success": True, "iceServers": servers or []})
             return
 
         if parsed.path == "/health":
@@ -648,14 +660,24 @@ def run_backend(host="0.0.0.0", port=None):
     listener.start()
 
     try:
-        audio_processor = AudioProcessor(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
+        audio_processor = Gemini(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
+        #audio_processor = AudioProcessor(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
         print("✓ Audio processor: Gemini transcription ready")
     except Exception as exc:
         audio_processor = None
         print(f"✗ Audio processor: failed to initialize — {exc}")
 
+    cloudflare_turn = CloudflareTurn(
+        config.CF_TURN_KEY_ID, config.CF_TURN_API_TOKEN, config.CF_TURN_TTL
+    )
+    if cloudflare_turn.enabled:
+        print("✓ Backend: Cloudflare TURN relay enabled")
+    else:
+        print("⚠ Backend: Cloudflare TURN not configured — viewers on mobile data may fail to connect")
+
     server = ThreadingHTTPServer((host, port), MessageBusRequestHandler)
     server.bus = bus
+    server.cloudflare_turn = cloudflare_turn
     server.message_store = message_store
     server.gif_store = gif_store
     server.settings_store = settings_store

@@ -45,14 +45,15 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
+from turn import CloudflareTurn
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from session import Session
 from ray import RayTracer
-from sd35 import OpticalFlow, SuperResolution
+from ai import OpticalFlow, SuperResolution
 from sim import Simulator
 from ui import Camera, Mic, Mouse
 from director import Director
-from stream import FrameBus, StreamingServer
+from stream import FrameBus, StreamingServer, build_ice_servers
 
 def get_first_part(parts, kind):
     for part in parts or []:
@@ -208,7 +209,7 @@ async def main():
     thumb_h = int(thumb_w * config.WINDOW_H / config.WINDOW_W)
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
     gif_last_frame = None
-    GIF_DIFF_THRESHOLD = 4.0  # mean abs pixel diff (0-255) required to add a frame
+    stream_last_frame = None
     overlay_on = True # To show or hide QR code
     joined_users = {"Director"}
 
@@ -241,6 +242,13 @@ async def main():
     runner = None
     if config.stream_on:
         frame_bus = FrameBus()
+        cloudflare_turn = CloudflareTurn(
+            config.CF_TURN_KEY_ID, config.CF_TURN_API_TOKEN, config.CF_TURN_TTL
+        )
+        if cloudflare_turn.enabled:
+            print("✓ PC: Cloudflare TURN relay enabled")
+        elif not config.TURN_URL:
+            print("⚠ PC: no TURN relay configured — viewers on mobile data may fail to connect")
         streaming = StreamingServer(
             frame_bus=frame_bus,
             W=config.WINDOW_W,
@@ -248,6 +256,10 @@ async def main():
             viewer_html=config.VIEWER_HTML,
             host=config.HOST_IP,
             port=8080,
+            ice_servers=build_ice_servers(
+                config.TURN_URL, config.TURN_USERNAME, config.TURN_PASSWORD
+            ),
+            turn_provider=cloudflare_turn.get_ice_servers if cloudflare_turn.enabled else None,
         )
         # The LAN viewer is a debug convenience — webapp viewers connect via
         # bus-relayed signaling, which works even if this bind fails.
@@ -639,12 +651,16 @@ async def main():
             frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
-        if gif_last_frame is None or np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > GIF_DIFF_THRESHOLD:
+        gif_changed = (
+            gif_last_frame is None or
+            np.mean(np.abs(thumb.astype(np.float32) - gif_last_frame.astype(np.float32))) > config.GIF_DIFF_THRESHOLD
+        )
+        if gif_changed:
             last_frames.append(thumb)
             gif_last_frame = thumb
-
-        if frame_bus is not None:
+        if frame_bus is not None and gif_changed:
             frame_bus.publish(frame)
+
         if overlay_on:
             out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
         else:

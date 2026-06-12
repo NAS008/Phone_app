@@ -61,7 +61,19 @@ class Config:
     # Streaming
     stream_on = True
     HOST_IP = "192.168.68.57"
+    # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
+    # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a
+    # key under Cloudflare dashboard → Realtime → TURN Server, then set both
+    # env vars on the PC and on Railway (backend).
+    CF_TURN_KEY_ID    = _os.environ.get('CF_TURN_KEY_ID', '')
+    CF_TURN_API_TOKEN = _os.environ.get('CF_TURN_API_TOKEN', '')
+    CF_TURN_TTL       = 86400  # credential lifetime (s); auto-refreshed at 80%
+    # Fallback: static self-hosted relay, e.g. TURN_URL="turn:<vm-ip>:3478".
+    TURN_URL      = _os.environ.get('TURN_URL', '')
+    TURN_USERNAME = _os.environ.get('TURN_USERNAME', '')
+    TURN_PASSWORD = _os.environ.get('TURN_PASSWORD', '')
     VIEWER_HTML = r"../tests/viewer.html"
+    GIF_DIFF_THRESHOLD = 2.0  # mean abs pixel diff (0-255) required to add a frame
 
     # Google
     GEMINI_API_KEY = __import__('os').environ.get('GEMINI_API_KEY', '')
@@ -91,7 +103,7 @@ class Config:
     GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
 
     # Optical flow
-    OF_FRAMES = 16
+    OF_FRAMES = 10
 
     STYLE = {
         "Botanical Lithograph": {
@@ -347,7 +359,7 @@ class Config:
     }
 
     # Director (auto-play)
-    DIRECTOR_PROMPT_INTERVAL = 30    # seconds between AI-generated prompts
+    DIRECTOR_PROMPT_INTERVAL = 20    # seconds between AI-generated prompts
 
     MOTION_LORAS = [
         # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors

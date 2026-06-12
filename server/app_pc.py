@@ -54,6 +54,7 @@ from sim import Simulator
 from ui import Camera, Mic, Mouse
 from director import Director
 from stream import FrameBus, StreamingServer, build_ice_servers
+from brand import Brand
 
 def get_first_part(parts, kind):
     for part in parts or []:
@@ -182,6 +183,9 @@ async def main():
     img_a_hires = super.upscale(img_a)
     sim.new_image(img_a)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
+    brand = Brand()
+    brand_on = False
+    _brand_mask = None
 
     # Raytracer setup
     ray = RayTracer(
@@ -391,7 +395,7 @@ async def main():
 
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
-        nonlocal img_a, img_a_hires
+        nonlocal img_a, img_a_hires, brand_on, _brand_mask
 
         if 'shape' in params:
             new_shape = int(params['shape'])
@@ -420,6 +424,12 @@ async def main():
         if 'overlay_on' in params:
             overlay_on = bool(params['overlay_on'])
             print(f"✓ PC: overlay set to {overlay_on}")
+
+        if 'brand_on' in params:
+            brand_on = bool(params['brand_on'])
+            _brand_mask = None  # invalidate cached mask on toggle
+            director.set_brand_on(brand_on, Brand._BRANDED_THEMES)
+            print(f"✓ PC: brand overlay set to {brand_on}")
 
         if 'go_back_on' in params:
             sim_go_back_on = bool(params['go_back_on'])
@@ -651,6 +661,11 @@ async def main():
             frame = ray.sphere(sim.xyz, sim.rgb, 4.0 * sim.r)
         else:
             frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
+
+        if brand_on:
+            if _brand_mask is None:
+                _brand_mask = brand.render_mask(config.WINDOW_W, config.WINDOW_H)
+            frame = Brand.composite_mask_over_frame(frame, _brand_mask)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         gif_changed = (

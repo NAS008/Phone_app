@@ -321,6 +321,7 @@ const [settingsConstraintsMode, setSettingsConstraintsMode] = useState(0);
   const [settingsGradientMode, setSettingsGradientMode] = useState(0);
   const [settingsWorldMode, setSettingsWorldMode] = useState(0);
   const [settingsOverlayOn, setSettingsOverlayOn] = useState(true);
+  const [settingsBrandOn, setSettingsBrandOn] = useState(false);
   const [settingsDirectorMode, setSettingsDirectorMode] = useState("auto_play");
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -589,6 +590,7 @@ const appendFeed = useCallback((message) => {
     if (s.world_mode !== undefined)        setSettingsWorldMode(Number(s.world_mode));
     if (s.go_back_on !== undefined)        setSettingsGoBackOn(Boolean(s.go_back_on));
     if (s.overlay_on !== undefined)        setSettingsOverlayOn(Boolean(s.overlay_on));
+    if (s.brand_on !== undefined)          setSettingsBrandOn(Boolean(s.brand_on));
     if (s.director_mode !== undefined)     setSettingsDirectorMode(String(s.director_mode));
   }, []);
 
@@ -1276,6 +1278,23 @@ const appendFeed = useCallback((message) => {
                   const next = !settingsOverlayOn;
                   setSettingsOverlayOn(next);
                   sendSetting("overlay_on", next);
+                }}
+              >
+                <span className="settings-toggle__thumb" />
+              </button>
+            </div>
+
+            <div className="settings-section settings-row">
+              <span className="settings-label">Brand Overlay</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settingsBrandOn}
+                className={`settings-toggle${settingsBrandOn ? " on" : ""}`}
+                onClick={() => {
+                  const next = !settingsBrandOn;
+                  setSettingsBrandOn(next);
+                  sendSetting("brand_on", next);
                 }}
               >
                 <span className="settings-toggle__thumb" />

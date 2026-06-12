@@ -28,21 +28,26 @@ class CompositionSpec:
     logos: List[OverlayLogoSpec]
 
 class Brand:
+    _BRANDED_THEMES = [
+            "labrador dog",
+            "labrador puppy",
+            "labrador dog fetching",
+            "labrador dog riding a car",
+            "labrador dog house",
+            "labrador dog dressed as a doctor",
+        ]
+    _BRAND_STYLE = "inspired by Soviet Constructivist posters, warm red, soft steel grey, bone white, gentle diagonals, friendly labrador mascot as central figure"
+    _BRAND_LOGO = "../../brand/fidelidade/logo.png"
+    _BRAND_SELLING_LINE = "Não se fala de dinheiro à mesa, mas devia"
+    _BRAND_FONT = "C:/Windows/Fonts/arial.ttf"
+
     def __init__(self):
         # Make sure brand.py is saved as UTF-8 in your editor.
-        self.logo_path = "../../brand/fidelidade/logo.png"
-        self.selling_line = "Não se fala de dinheiro à mesa, mas devia"
-        self.font_name = "HERSHEY_SIMPLEX"
+        self.logo_path = self._BRAND_LOGO
+        self.selling_line = self._BRAND_SELLING_LINE
+        self.font = self._BRAND_FONT
         self.dark_color_transparent = True  # red logo on white bg
         self.line_spacing = 1.2
-
-        self.font_styles = [
-            "C:/Windows/Fonts/arial.ttf",
-            "C:/Windows/Fonts/arialbd.ttf",
-            "C:/Windows/Fonts/calibri.ttf",
-        ]
-        self.font_style_index = 2           # pick font_styles[0] by default
-        self.font_bold = False              # if True, fake bold by drawing twice
 
         # Text layout config
         text_cfg = {
@@ -143,7 +148,7 @@ class Brand:
             y_center = int(txt.y * window_h)
             max_width = int(txt.width * window_w)
 
-            font_path = self.font_styles[self.font_style_index % len(self.font_styles)]
+            font_path = self.font
             font_size = int(window_h * 0.035)
             font = ImageFont.truetype(font_path, font_size)
 
@@ -194,8 +199,6 @@ class Brand:
             for (line, lw, lh, _, _), y_off in zip(line_metrics, line_y_offsets):
                 line_x = block_x + (max_line_w - lw)
                 cur_y = block_y + y_off
-                if self.font_bold:
-                    draw.text((line_x + 1, cur_y), line, font=font, fill=text_fill)
                 draw.text((line_x, cur_y), line, font=font, fill=text_fill)
 
         # Logo

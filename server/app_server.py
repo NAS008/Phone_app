@@ -26,6 +26,7 @@ from config import Config
 from bus import Bus
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from ai import Gemini, GeminiBlockedError, StableDiffusion, AnimateDiff, Folder
+from brand import Brand
 
 def extract_first_text(parts):
     for part in parts or []:
@@ -83,6 +84,7 @@ async def main():
     session_histories = {}
     pending_parts = {}
     ai_mode = 0
+    brand_on = False
     last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
     last_sd_prompt = ""
     _sd = None
@@ -483,7 +485,7 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode, current_style
+        nonlocal current_session_id, ai_mode, current_style, brand_on
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
         if "mode" in params:
@@ -503,8 +505,13 @@ async def main():
             style_values = list(config.STYLE.values())
             if 0 <= idx < len(style_values):
                 current_style = style_values[idx]
-                gemini.STYLE = current_style["long"]
+                if not brand_on:
+                    gemini.STYLE = current_style["long"]
                 print(f"✓ Server: style set to '{current_style['name']}'")
+        if "brand_on" in params:
+            brand_on = bool(params["brand_on"])
+            gemini.STYLE = Brand._BRAND_STYLE if brand_on else current_style["long"]
+            print(f"✓ Server: brand mode set to {brand_on}")
 
     bus.on(Bus.SESSION, on_session)
     bus.on(Bus.USER_JOINED, on_user_joined)

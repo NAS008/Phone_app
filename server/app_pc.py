@@ -521,7 +521,9 @@ async def main():
 
     async def on_webrtc_offer(payload):
         session_id = str(payload.get("session_id") or "")
+        print(f"✓ PC: webrtc_offer received session_id={session_id!r} expected={str(session.session_id)!r}")
         if session_id != str(session.session_id) and session_id != config.ADMIN_SESSION_ID:
+            print(f"✗ PC: webrtc_offer dropped — session_id mismatch")
             return
         offer_id = payload.get("offer_id")
         sdp = payload.get("sdp")

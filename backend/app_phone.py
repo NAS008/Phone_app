@@ -656,8 +656,7 @@ def run_backend(host="0.0.0.0", port=None):
     listener.start()
 
     try:
-        audio_processor = Gemini(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
-        #audio_processor = AudioProcessor(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
+        audio_processor = AudioProcessor(api_key=config.GEMINI_API_KEY, model=config.GEMINI_STT_MODEL)
         print("✓ Audio processor: Gemini transcription ready")
     except Exception as exc:
         audio_processor = None

@@ -987,7 +987,7 @@ const appendFeed = useCallback((message) => {
 
   if (isStreamOpen) {
     return (
-      <div className="artist-mode">
+      <div className="artist-mode artist-mode--stream">
         <StreamView
           sessionId={sessionId}
           nickname={nickname}

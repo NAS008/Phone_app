@@ -60,7 +60,7 @@ class Config:
 
     # Streaming
     stream_on = True
-    HOST_IP = "192.168.68.57"
+    HOST_IP = "192.168.68.60"
     # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
     # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a
     # key under Cloudflare dashboard → Realtime → TURN Server, then set both

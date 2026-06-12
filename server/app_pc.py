@@ -679,7 +679,7 @@ async def main():
             streaming.publish_mjpeg(thumb)
 
         if overlay_on:
-            out = overlay(frame, qr_img, proportion=20, alignment="bottom center")
+            out = overlay(frame, qr_img, proportion=24, alignment="bottom left")
         else:
             out = frame
         cv2.imshow(config.APP_NAME, out)

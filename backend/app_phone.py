@@ -31,8 +31,6 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from config import Config
 from bus import Bus
 from turn import CloudflareTurn
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
-from ai import Gemini
 
 def _now_ms():
     return int(time.time() * 1000)
@@ -119,8 +117,6 @@ def _extract_text_from_parts(parts):
             chunks.append(part["text"])
     return "\n".join(chunks).strip() if chunks else None
 
-# !!!!!!!!!!!!!
-# Test to see if it can be removed and used from ai.py instead ti have all ai in same place
 class AudioProcessor:
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         self.client = genai.Client(api_key=api_key)

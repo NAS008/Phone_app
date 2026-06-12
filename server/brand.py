@@ -36,7 +36,7 @@ class Brand:
             "labrador dog house",
             "labrador dog dressed as a doctor",
         ]
-    _BRAND_STYLE = "inspired by Soviet Constructivist posters, warm red, soft steel grey, bone white, gentle diagonals, friendly labrador mascot as central figure"
+    _BRAND_STYLE = "warm red, soft steel grey, bone white, bold diagonal lines, friendly labrador as the hero and central focus"
     _BRAND_LOGO = "../../brand/fidelidade/logo.png"
     _BRAND_SELLING_LINE = "Não se fala de dinheiro à mesa, mas devia"
     _BRAND_FONT = "C:/Windows/Fonts/arial.ttf"

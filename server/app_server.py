@@ -234,7 +234,7 @@ async def main():
                 anchor_bgr = last_generated_image_bgr
 
             prompt_text = extract_first_text(effective_parts) or "an artistic scene"
-            style_suffix = current_style["short"]
+            style_suffix = Brand._BRAND_STYLE if brand_on else current_style["short"]
 
             n_clips = config.CLIPS_PER_SCENE
             n_loras = len(config.MOTION_LORAS)
@@ -301,7 +301,7 @@ async def main():
                 del history[: len(history) - config.CONTEXT_SIZE]
 
             prompt_text = extract_first_text(effective_parts) or "an artistic scene"
-            style_suffix = current_style.get("short") or ""
+            style_suffix = Brand._BRAND_STYLE if brand_on else (current_style.get("short") or "")
             sd_prompt = f"{prompt_text}, {style_suffix}" if style_suffix else prompt_text
 
             print(f"✓ Server: SD text-to-image — '{sd_prompt}'")
@@ -428,7 +428,7 @@ async def main():
             prev_prompt = last_sd_prompt
             # Subject first so CLIP truncation only costs trailing style tokens;
             # T5 (prompt_3) still carries the full text.
-            style_short = current_style.get("short") or ""
+            style_short = Brand._BRAND_STYLE if brand_on else (current_style.get("short") or "")
             subject = " ".join(prompt_used.split()[:30])
             new_prompt = f"{subject}, {style_short}" if style_short else subject
             last_generated_image_bgr = new_bgr

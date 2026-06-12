@@ -67,8 +67,6 @@
   align-items: center;
   padding: 10px 12px;
   border-radius: 20px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .assistant-brand-mark {

@@ -278,6 +278,25 @@ const VideoIcon = (props) => (
   </svg>
 );
 
+const StreamIcon = (props) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    {...props}
+  >
+    <rect x="3" y="6" width="18" height="15" rx="2" />
+    <polyline points="12 2 12 12" />
+    <polyline points="8 6 12 2 16 6" />
+  </svg>
+);
+
 const HeartIcon = (props) => (
   <svg
     width="18"
@@ -1007,13 +1026,6 @@ const appendFeed = useCallback((message) => {
 
       <header
         className="assistant-header"
-        role="button"
-        tabIndex={0}
-        onClick={() => setIsStreamOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") setIsStreamOpen(true);
-        }}
-        aria-label="Open live artwork stream"
       >
         <div className="assistant-brand-mark" aria-hidden="true">
           <img
@@ -1509,6 +1521,17 @@ const appendFeed = useCallback((message) => {
               title="Get animated clip"
             >
               <VideoIcon />
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="icon-button action-button"
+              onClick={() => setIsStreamOpen(true)}
+              aria-label="Open live artwork stream"
+            >
+              <StreamIcon />
             </button>
           )}
 

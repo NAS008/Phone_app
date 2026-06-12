@@ -61,24 +61,32 @@ class Director:
 
     NICKNAME = "Director"
     _THEMES = [
-        "colossal shell",
-        "tiny abandoned house floating",
-        "jellyfish beneath a hot air balloon",
-        "colossal ivory white sculptural on the beach",
-        "a giant ship stuck in the sand",
-        "giant wave",
-        "person with pomegranate diving helmet and scarf on the desert",
-        "person with thick black goggles and indigo blue scarf on the desert",
-        "person with thick black goggles and covid mask on orange desert",
-        "colossal barnacled shell",
-        "crowd of people rushing on the orange subway",
-        "crowd of people with shopping carts in crowded supermarket",
-        "birds eye of crowded city with red bridges",
-        "colossal red coral sculpture on the beach",
-        "colossal sea anemone in the desert",
-        "alien ship in the sea",
-        "rusty toaster on the beach",
+        "labrador dog",
+        "labrador puppy",
+        "labrador dog fetching",
+        "labrador dog riding a car",
+        "labrador dog house",
+        "labrador dog dressed as a doctor",
     ]
+    # _THEMES = [
+    #     "colossal shell",
+    #     "tiny abandoned house floating",
+    #     "jellyfish beneath a hot air balloon",
+    #     "colossal ivory white sculptural on the beach",
+    #     "a giant ship stuck in the sand",
+    #     "giant wave",
+    #     "person with pomegranate diving helmet and scarf on the desert",
+    #     "person with thick black goggles and indigo blue scarf on the desert",
+    #     "person with thick black goggles and covid mask on orange desert",
+    #     "colossal barnacled shell",
+    #     "crowd of people rushing on the orange subway",
+    #     "crowd of people with shopping carts in crowded supermarket",
+    #     "birds eye of crowded city with red bridges",
+    #     "colossal red coral sculpture on the beach",
+    #     "colossal sea anemone in the desert",
+    #     "alien ship in the sea",
+    #     "rusty toaster on the beach",
+    # ]
 
     _AUTO_PLAY_SHAPES = [0, 1, 2, 3, 4]  # shape 5 (flat) reserved for auto_gen
     _HUMAN_PATHS = [

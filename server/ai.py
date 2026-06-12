@@ -29,7 +29,7 @@ _BLOCK_MESSAGES: Dict[str, str] = {
     "SPII": "The description may contain sensitive personal information. Try making it more general.",
     "IMAGE_SAFETY": "The image was flagged for safety. Try a different scene or subject.",
 }
-   
+
 class GeminiBlockedError(Exception):
     """Raised when Gemini refuses to generate an image for a policy reason."""
     def __init__(self, reason: str, user_message: str):
@@ -53,6 +53,8 @@ class Gemini:
         self.STYLE = STYLE["long"] if isinstance(STYLE, dict) else STYLE
         print("✓ Gemini: unified text/image model ready")
 
+        self.brand_context: Optional[BrandContext] = None
+
     def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
         last_exc = None
         for attempt in range(3):
@@ -73,7 +75,7 @@ class Gemini:
                 if attempt < 2:
                     time.sleep(1.5)
         raise last_exc
-    
+
     def _extract_text(self, response) -> str:
         text = getattr(response, "text", None)
         if text:

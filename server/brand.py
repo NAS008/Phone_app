@@ -237,19 +237,30 @@ class Brand:
         return np.array(canvas_pil)  # RGBA (H, W, 4)
 
     @staticmethod
+    def prepare_blend(mask_rgba: np.ndarray):
+        """Precompute fixed blend arrays from the mask. Call once before the loop."""
+        mask_a    = mask_rgba[:, :, 3:4].astype(np.float32) / 255.0  # (H,W,1)
+        mask_bgr  = mask_rgba[:, :, 2::-1].astype(np.float32)        # RGBA→BGR float32
+        mask_premul = mask_a * mask_bgr                               # (H,W,3)
+        inv_alpha   = 1.0 - mask_a                                    # (H,W,1)
+        return mask_premul, inv_alpha
+
+    @staticmethod
+    def blend(frame_bgr: np.ndarray, mask_premul: np.ndarray, inv_alpha: np.ndarray) -> np.ndarray:
+        """Per-frame brand overlay. No color conversion; uses precomputed mask arrays."""
+        return np.clip(mask_premul + inv_alpha * frame_bgr.astype(np.float32), 0, 255).astype(np.uint8)
+
+    @staticmethod
     def composite_mask_over_frame(
         frame_bgr: np.ndarray,
         mask_rgba: np.ndarray,
         strength: float = 1.0,
     ) -> np.ndarray:
-        assert frame_bgr.shape[:2] == mask_rgba.shape[:2]
-
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
-        mask_rgb = mask_rgba[:, :, :3].astype(np.float32)
-        mask_a = mask_rgba[:, :, 3:4].astype(np.float32) / 255.0 * strength
-
-        out_rgb = mask_a * mask_rgb + (1.0 - mask_a) * frame_rgb
-        return cv2.cvtColor(np.clip(out_rgb, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        mask_premul, inv_alpha = Brand.prepare_blend(mask_rgba)
+        if strength != 1.0:
+            mask_premul = mask_premul * strength
+            inv_alpha   = 1.0 - (1.0 - inv_alpha) * strength
+        return Brand.blend(frame_bgr, mask_premul, inv_alpha)
     
     def resize_to_fit_window(self, img, window_w, window_h):
         target_w = window_w

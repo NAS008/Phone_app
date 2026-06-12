@@ -185,7 +185,9 @@ async def main():
     logo = cv2.imread(r"..\..\brand\logo_white.png")
     brand = Brand()
     brand_on = False
-    _brand_mask = None
+    _brand_premul, _brand_inv_alpha = Brand.prepare_blend(
+        brand.render_mask(config.WINDOW_W, config.WINDOW_H)
+    )
 
     # Raytracer setup
     ray = RayTracer(
@@ -395,7 +397,7 @@ async def main():
 
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
-        nonlocal img_a, img_a_hires, brand_on, _brand_mask
+        nonlocal img_a, img_a_hires, brand_on
 
         if 'shape' in params:
             new_shape = int(params['shape'])
@@ -427,7 +429,6 @@ async def main():
 
         if 'brand_on' in params:
             brand_on = bool(params['brand_on'])
-            _brand_mask = None  # invalidate cached mask on toggle
             director.set_brand_on(brand_on, Brand._BRANDED_THEMES)
             print(f"✓ PC: brand overlay set to {brand_on}")
 
@@ -663,9 +664,7 @@ async def main():
             frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
 
         if brand_on:
-            if _brand_mask is None:
-                _brand_mask = brand.render_mask(config.WINDOW_W, config.WINDOW_H)
-            frame = Brand.composite_mask_over_frame(frame, _brand_mask)
+            frame = Brand.blend(frame, _brand_premul, _brand_inv_alpha)
 
         thumb = cv2.resize(frame, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
         gif_changed = (
@@ -675,8 +674,9 @@ async def main():
         if gif_changed:
             last_frames.append(thumb)
             gif_last_frame = thumb
-        if frame_bus is not None and gif_changed:
+        if streaming is not None and gif_changed:
             frame_bus.publish(frame)
+            streaming.publish_mjpeg(thumb)
 
         if overlay_on:
             out = overlay(frame, qr_img, proportion=20, alignment="bottom center")

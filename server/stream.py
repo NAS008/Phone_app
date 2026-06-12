@@ -1,18 +1,7 @@
-# Stream video to browser from cv2 frames
-# Check IP address of the PC generating frames and update in 'host'
-# Open in browser using http://{self.host}:8080/viewer.html
-#
-# USAGE
+# Stream video to browser from cv2 frames via WebRTC
 # frame_bus = FrameBus()
-# streaming = StreamingServer(
-#     frame_bus=frame_bus,
-#     config=config,
-#     viewer_html=VIEWER_HTML,
-#     host="192.168.68.61",
-#     port=8080,
-# )
+# streaming = StreamingServer(frame_bus=frame_bus, W=1920, H=1080, viewer_html=VIEWER_HTML, host="0.0.0.0", port=8080)
 # runner = await streaming.start()
-#
 # while True:
 #     frame_bus.publish(frame)
 
@@ -57,7 +46,7 @@ def ice_servers_from_dicts(entries):
     ]
 
 class FrameBus:
-    def __init__(self, max_side=1280):
+    def __init__(self, max_side=1920):
         self._lock = threading.Lock()
         self._frame = None
         self._max_side = max_side
@@ -114,59 +103,6 @@ class CvVideoTrack(VideoStreamTrack):
         frame.time_base = time_base
         return frame
 
-_TV_HTML = """\
-<!doctype html><html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stream</title>
-<style>
-  html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}
-  #v,#m{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
-  #s{position:fixed;top:10px;left:10px;color:#0f0;font:13px monospace;
-     background:rgba(0,0,0,.5);padding:4px 8px;pointer-events:none}
-</style></head><body>
-<div id="s">connecting...</div>
-<video id="v" autoplay playsinline muted style="display:none"></video>
-<img  id="m" style="display:none">
-<script>
-const s=document.getElementById('s'),v=document.getElementById('v'),m=document.getElementById('m');
-const WEBRTC_TIMEOUT=6000;
-
-function goFullscreen(){
-  const el=document.documentElement;
-  const fn=el.requestFullscreen||el.webkitRequestFullscreen||el.mozRequestFullScreen||el.msRequestFullscreen;
-  if(fn)fn.call(el).catch(()=>{});
-}
-// try on any remote/keyboard key or tap — TV remotes fire keydown
-document.addEventListener('keydown',goFullscreen,{once:true});
-document.addEventListener('click',goFullscreen,{once:true});
-// also try when video actually starts playing (works on some TV browsers without gesture)
-v.addEventListener('playing',goFullscreen,{once:true});
-
-function mjpeg(){
-  m.src='/mjpeg';m.style.display='';v.style.display='none';s.textContent='mjpeg';
-}
-async function webrtc(){
-  const pc=new RTCPeerConnection();
-  pc.addTransceiver('video',{direction:'recvonly'});
-  pc.ontrack=e=>{v.srcObject=e.streams[0];v.style.display='';m.style.display='none';s.textContent='webrtc';};
-  pc.onconnectionstatechange=()=>{
-    if(['failed','disconnected'].includes(pc.connectionState))mjpeg();
-  };
-  const timer=setTimeout(()=>{pc.close();mjpeg();},WEBRTC_TIMEOUT);
-  const offer=await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  const r=await fetch('/offer',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({sdp:pc.localDescription.sdp,type:pc.localDescription.type})});
-  if(!r.ok){clearTimeout(timer);return mjpeg();}
-  const ans=await r.json();
-  await pc.setRemoteDescription(ans);
-  clearTimeout(timer);
-}
-if(window.RTCPeerConnection)webrtc().catch(mjpeg);else mjpeg();
-</script></body></html>
-"""
-
 class StreamingServer:
     def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None):
         self.frame_bus = frame_bus
@@ -182,44 +118,9 @@ class StreamingServer:
         # credentials are short-lived; may block, so it runs in a thread.
         self.turn_provider = turn_provider
         self.pcs = set()
-        self._mjpeg_queues: set[asyncio.Queue] = set()
 
     async def viewer(self, request):
         return web.FileResponse(self.viewer_html)
-
-    async def tv(self, request):
-        return web.Response(text=_TV_HTML, content_type="text/html")
-
-    async def mjpeg(self, request):
-        q: asyncio.Queue = asyncio.Queue(maxsize=4)
-        self._mjpeg_queues.add(q)
-        resp = web.StreamResponse(headers={
-            "Content-Type": "multipart/x-mixed-replace; boundary=frame",
-            "Cache-Control": "no-cache",
-        })
-        await resp.prepare(request)
-        try:
-            while True:
-                jpg: bytes = await q.get()
-                await resp.write(
-                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
-                )
-        except (asyncio.CancelledError, ConnectionResetError):
-            pass
-        finally:
-            self._mjpeg_queues.discard(q)
-        return resp
-
-    def publish_mjpeg(self, frame_bgr: np.ndarray, quality: int = 70) -> None:
-        if not self._mjpeg_queues:
-            return
-        ok, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if not ok:
-            return
-        jpg = buf.tobytes()
-        for q in list(self._mjpeg_queues):
-            if not q.full():
-                q.put_nowait(jpg)
 
     async def answer_offer(self, sdp, sdp_type):
         # Shared by the local LAN viewer route and bus-relayed offers from the webapp
@@ -277,8 +178,6 @@ class StreamingServer:
         app = web.Application()
         app.router.add_get("/", self.viewer)
         app.router.add_get("/viewer.html", self.viewer)
-        app.router.add_get("/tv", self.tv)
-        app.router.add_get("/mjpeg", self.mjpeg)
         app.router.add_post("/offer", self.offer)
         app.on_shutdown.append(self.on_shutdown)
 

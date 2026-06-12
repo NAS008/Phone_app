@@ -676,7 +676,6 @@ async def main():
             gif_last_frame = thumb
         if streaming is not None and gif_changed:
             frame_bus.publish(frame)
-            streaming.publish_mjpeg(thumb)
 
         if overlay_on:
             out = overlay(frame, qr_img, proportion=24, alignment="bottom left")

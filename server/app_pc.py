@@ -207,7 +207,7 @@ async def main():
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
         G=config.G, L=config.LAYERS,
         smooth=3,
-        dt = 1.0 / config.FPS_SIM,
+        dt = config.SIM_SPEED / config.FPS_SIM,
     )
     sim_go_back_on = True
     sim_constraints_mode = 0

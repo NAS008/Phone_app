@@ -212,14 +212,16 @@ def k_insert_triangle(
     xyz: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
     h: float, G: wp.vec3i, cell_count: wp.array(dtype=int)
 ):
-    tid = wp.tid()    
+    tid = wp.tid()
     bh = next_x[tid]
     bv = next_y[tid]
     if bh < 0 or bv < 0:
-        return    
+        return
     bd = next_y[bh]
-    
-    p0 = xyz[tid]    
+    if bd < 0:
+        return
+
+    p0 = xyz[tid]
     p1 = xyz[bh]
     p2 = xyz[bd]
     p3 = xyz[bv]
@@ -235,7 +237,7 @@ def k_insert_triangle(
         wp.max(p0.y, wp.max(p1.y, wp.max(p2.y, p3.y))),
         wp.max(p0.z, wp.max(p1.z, wp.max(p2.z, p3.z)))
     )
-    
+
     cell_min = world_to_grid(tri_min, h, G)
     cell_max = world_to_grid(tri_max, h, G)
     for z in range(cell_min.z, cell_max.z + 1):
@@ -249,12 +251,14 @@ def k_fill_triangle(
     xyz: wp.array(dtype=wp.vec3), next_x: wp.array(dtype=int), next_y: wp.array(dtype=int),
     h: float, G: wp.vec3i, cell_start: wp.array(dtype=int), particle_ids: wp.array(dtype=int), cell_offset: wp.array(dtype=int)
 ):
-    tid = wp.tid()    
+    tid = wp.tid()
     bh = next_x[tid]
     bv = next_y[tid]
     if bh < 0 or bv < 0:
-        return    
+        return
     bd = next_y[bh]
+    if bd < 0:
+        return
     
     p0 = xyz[tid]    
     p1 = xyz[bh]
@@ -2084,13 +2088,15 @@ def raytrace_triangle(
             for i in range(count):
                 pid = particle_ids[start_idx + i]
 
-                # Specific to triangles ---------- 
-                bh = next_x[pid]  
+                # Specific to triangles ----------
+                bh = next_x[pid]
                 bv = next_y[pid]
                 if bh < 0 or bv < 0:
                     continue
                 bd = next_y[bh]
-                
+                if bd < 0:
+                    continue
+
                 p0 = xyz[pid]
                 p1 = xyz[bh]
                 p2 = xyz[bd]

@@ -6,12 +6,11 @@ class Config:
     # App
     URL = "https://tfnca.com"
     ADMIN_SESSION_ID = "1234"  # change this whenever you want; all apps accept it
-    APP_NAME = "RTX4070"
-    PHONE_NAME = "PHONE"
+    APP_NAME = "ARTIST"
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 3840, 2160#, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 1920, 1080#2622, 1206#3840, 2160#, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
     IMAGE_SIZE = 512
     GRID_SIZE = 128
     PIXELS_PER_CELL = 8#IMAGE_SIZE // GRID_SIZE
@@ -35,6 +34,7 @@ class Config:
     shadow = 0.3
     FPS = 12
     FPS_SIM = FPS * 2
+    SIM_SPEED = 0.5  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
     world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
@@ -60,8 +60,8 @@ class Config:
 
     # Streaming
     stream_on = True
-    STREAM_MAX_SIDE = 1920
-    STREAM_BITRATE = 20_000_000   # VP8 target bitrate ceiling — WebRTC CC reduces this on limited links
+    STREAM_MAX_SIDE = 0           # 0 is for the window resolution
+    STREAM_BITRATE = 80_000_000   # VP8 target bitrate ceiling — WebRTC CC reduces this on limited links
     HOST_IP = "192.168.68.60"
     # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
     # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a

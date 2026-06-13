@@ -85,7 +85,7 @@ async def main():
     pending_parts = {}
     ai_mode = 0
     brand_on = False
-    last_generated_image_bgr = np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+    last_generated_image_bgr = np.zeros((config.IMAGE_H, config.IMAGE_W, 3), dtype=np.uint8)
     last_sd_prompt = ""
     _sd = None
     _ad = None
@@ -94,7 +94,7 @@ async def main():
     def get_folder():
         nonlocal _folder
         if _folder is None:
-            _folder = Folder(image_size=config.IMAGE_SIZE, input_folder=config.INPUT_FOLDER)
+            _folder = Folder(image_w=config.IMAGE_W, image_h=config.IMAGE_H, input_folder=config.INPUT_FOLDER)
             print(f"✓ Server: Folder ready ({len(_folder.paths)} images)")
         return _folder
 
@@ -104,7 +104,7 @@ async def main():
             return get_folder().load_image()
         except Exception as e:
             print(f"✗ Server: folder seed failed, starting from black: {e}")
-            return np.zeros((config.IMAGE_SIZE, config.IMAGE_SIZE, 3), dtype=np.uint8)
+            return np.zeros((config.IMAGE_H, config.IMAGE_W, 3), dtype=np.uint8)
 
     last_generated_image_bgr = folder_image_or_black()
 
@@ -114,8 +114,8 @@ async def main():
             print("✓ Server: loading StableDiffusion...")
             _sd = StableDiffusion(
                 SD_MODEL=config.SD_MODEL,
-                IW=config.IMAGE_SIZE,
-                IH=config.IMAGE_SIZE,
+                IW=config.IMAGE_W,
+                IH=config.IMAGE_H,
                 INFERENCE_STEPS=config.SD_INFERENCE_STEPS,
                 GUIDANCE_SCALE=config.SD_GUIDANCE_SCALE,
                 SEED=config.SD_SEED,
@@ -132,8 +132,8 @@ async def main():
                 MOTION_ADAPTER=config.AD_MOTION_ADAPTER,
                 SD_BASE=config.AD_SD_BASE,
                 MOTION_LORAS=config.MOTION_LORAS,
-                IW=config.IMAGE_SIZE,
-                IH=config.IMAGE_SIZE,
+                IW=config.IMAGE_W,
+                IH=config.IMAGE_H,
                 NUM_FRAMES=config.AD_NUM_FRAMES,
                 INFERENCE_STEPS=config.AD_INFERENCE_STEPS,
                 GUIDANCE_SCALE=config.AD_GUIDANCE_SCALE,
@@ -227,7 +227,7 @@ async def main():
             if image_part:
                 anchor_bgr = jpeg_to_bgr(image_part["data"])
                 if anchor_bgr is not None:
-                    anchor_bgr = cv2.resize(anchor_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+                    anchor_bgr = cv2.resize(anchor_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
                 else:
                     anchor_bgr = last_generated_image_bgr
             else:
@@ -314,7 +314,7 @@ async def main():
                 await _publish_error(effective_session_id, "SD image generation failed. Please try again.", turn_id)
                 return
 
-            new_bgr = cv2.resize(new_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
             kb = len(bgr_to_jpeg(new_bgr)) // 1024
             print(f"✓ Server: SD generated {kb} KB — {prompt_text}")
 
@@ -416,7 +416,7 @@ async def main():
             if new_bgr is None:
                 await _publish_error(effective_session_id, "Failed to decode generated image.", turn_id)
                 return
-            new_bgr = cv2.resize(new_bgr, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
             prompt_used = result.get("prompt", "")
             kb = len(image_part["data"]) // 1024
             print(f"✓ Server: Gemini image {kb} KB — {prompt_used}")

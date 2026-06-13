@@ -51,14 +51,15 @@ async def main():
     config = Config()
 
     sim = Simulator(
-        IMAGE_SIZE=config.IMAGE_SIZE,
+        IMAGE_W=config.IMAGE_W,
+        IMAGE_H=config.IMAGE_H,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
         G=config.G,
         L=config.LAYERS,
         smooth=3,
         dt = 1.0 / config.FPS_SIM,
     )
-    folder = Folder(config.IMAGE_SIZE, config.INPUT_FOLDER)
+    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img)
     sim_gradient_on = False

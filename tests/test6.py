@@ -16,7 +16,7 @@ from painter import Painter
 
 async def main():
     config = Config()
-    folder = Folder(config.IMAGE_SIZE, config.INPUT_FOLDER)
+    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     image = folder.load_image()
     BRUSH_PATH  = r"..\..\brand\brush03.png"      # greyscale, black = paint
 

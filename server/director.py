@@ -80,7 +80,7 @@ class Director:
         "rusty toaster on the beach",
     ]
 
-    _AUTO_PLAY_SHAPES = [0, 1, 2, 3, 4]  # shape 5 (flat) reserved for auto_gen
+    _AUTO_PLAY_SHAPES = [0, 1, 2, 3, 4, 5]
     _HUMAN_PATHS = [
         # 1. Lazy drift across centre
         [(0.5, 0.5), (0.22, 0.52),

@@ -10,7 +10,7 @@ from brand import Brand
 
 config = Config()
 brand = Brand()
-folder = Folder(image_size=config.IMAGE_SIZE, input_folder=config.INPUT_FOLDER)
+folder = Folder(image_w=config.IMAGE_W, image_h=config.IMAGE_H, input_folder=config.INPUT_FOLDER)
 img = folder.load_image()
 img = brand.resize_to_fit_window(img, config.WINDOW_W, config.WINDOW_H)
 

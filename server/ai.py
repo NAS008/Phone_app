@@ -360,8 +360,9 @@ class Gemini:
     #     return None
 
 class Folder:
-    def __init__(self, image_size, input_folder):
-        self.image_size = image_size
+    def __init__(self, image_w, image_h, input_folder):
+        self.image_w = image_w
+        self.image_h = image_h
         self.paths = self._init_image_list(input_folder)
 
     def _init_image_list(self, folder, extensions=("*.png", "*.jpg", "*.jpeg")):
@@ -400,8 +401,29 @@ class Folder:
             image_path = random.choice(self.paths)
         else:
             image_path = self.paths[id]
-        image = self._adjust_image(image_path, self.image_size, self.image_size)
+        image = self._adjust_image(image_path, self.image_w, self.image_h)
         return image
+    
+    def resize_to_fit_window(self, img, window_w, window_h):
+        target_w = window_w
+        target_h = window_h
+
+        img_h, img_w = img.shape[:2]
+
+        # Scale to cover the whole target area
+        scale = max(float(target_w) / float(img_w), float(target_h) / float(img_h))
+        new_w = max(1, int(round(img_w * scale)))
+        new_h = max(1, int(round(img_h * scale)))
+
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+
+        # Center-crop to exact window size
+        x0 = max(0, (new_w - target_w) // 2)
+        y0 = max(0, (new_h - target_h) // 2)
+
+        frame = resized[y0:y0 + target_h, x0:x0 + target_w]
+
+        return frame
     
 class StableDiffusion:
     def __init__(self, SD_MODEL, IW, IH, INFERENCE_STEPS=12, GUIDANCE_SCALE=3.5, SEED=80367253):

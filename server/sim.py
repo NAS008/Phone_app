@@ -402,7 +402,7 @@ def k_base_id(
 
 @wp.kernel
 def k_color_id(
-    pixels: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    pixels: wp.array(dtype=wp.uint8), IMAGE_W: int, IMAGE_H: int,
     xyz_base: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3),
     color_id: wp.array(dtype=int),
     h: float, G: wp.vec3i
@@ -410,13 +410,11 @@ def k_color_id(
     tid = wp.tid()
 
     p = xyz_base[tid]
-    x0 = (1.0 - h * float(G.x)) / 2.0
-    y0 = (1.0 - h * float(G.y)) / 2.0
+    scale = float(IMAGE_W)
+    ix = wp.clamp(int(p.x * scale), 0, IMAGE_W - 1)
+    iy = wp.clamp(int((h * float(G.y) - p.y) * scale), 0, IMAGE_H - 1)
 
-    ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-    iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-
-    idx = 3 * (ix + iy * IMAGE_SIZE)
+    idx = 3 * (ix + iy * IMAGE_W)
     r = int(pixels[idx + 2])
     g = int(pixels[idx + 1])
     b = int(pixels[idx])
@@ -428,7 +426,7 @@ def k_color_id(
 
 @wp.kernel
 def k_new_image_sorted(
-    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_W: int, IMAGE_H: int,
     xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float), base_id: wp.array(dtype=int), goal_id: wp.array(dtype=int),
     h: float, G: wp.vec3i, depth_factor: float
 ):
@@ -437,11 +435,10 @@ def k_new_image_sorted(
     bid = base_id[tid]
     gid = goal_id[tid]
     p = xyz_base[gid]
-    x0 = (1.0 - h * float(G.x)) / 2.0
-    y0 = (1.0 - h * float(G.y)) / 2.0
-    ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-    iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-    idc  = 3 * (ix  + iy  * IMAGE_SIZE)
+    scale = float(IMAGE_W)
+    ix = wp.clamp(int(p.x * scale), 0, IMAGE_W - 1)
+    iy = wp.clamp(int((h * float(G.y) - p.y) * scale), 0, IMAGE_H - 1)
+    idc  = 3 * (ix  + iy  * IMAGE_W)
     
     rgb[bid] = wp.vec3(
         float(pixels[idc + 2]),
@@ -476,18 +473,17 @@ def k_new_image_sorted(
 
 @wp.kernel
 def k_new_image(
-    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_SIZE: int,
+    pixels: wp.array(dtype=wp.uint8), blurred: wp.array(dtype=wp.uint8), IMAGE_W: int, IMAGE_H: int,
     xyz_base: wp.array(dtype=wp.vec3), xyz_goal: wp.array(dtype=wp.vec3), rgb: wp.array(dtype=wp.vec3), rot: wp.array(dtype=wp.vec3), invmass: wp.array(dtype=float),
     h: float, G: wp.vec3i, depth_factor: float
 ):
     tid = wp.tid()
 
     p = xyz_base[tid]
-    x0 = (1.0 - h * float(G.x)) / 2.0
-    y0 = (1.0 - h * float(G.y)) / 2.0
-    ix = wp.clamp(int((x0 + p.x) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-    iy = wp.clamp(int((1.0 - y0 - p.y) * float(IMAGE_SIZE)), 0, IMAGE_SIZE - 1)
-    idc  = 3 * (ix  + iy  * IMAGE_SIZE)
+    scale = float(IMAGE_W)
+    ix = wp.clamp(int(p.x * scale), 0, IMAGE_W - 1)
+    iy = wp.clamp(int((h * float(G.y) - p.y) * scale), 0, IMAGE_H - 1)
+    idc  = 3 * (ix  + iy  * IMAGE_W)
     
     rgb[tid] = wp.vec3(
         float(pixels[idc + 2]),
@@ -894,7 +890,7 @@ def k_update_vel_from_positions(
 
 class Simulator:
     def __init__(self,
-        IMAGE_SIZE=512, PIXELS_PER_CELL=4,
+        IMAGE_W=512, IMAGE_H=512, PIXELS_PER_CELL=4,
         G=[128, 128, 32], L=1, smooth=15,
         gradient_strength=0.1, pressure_steps=5, jacobi=0.1, dt=0.1, flip_alpha=0.95,
         num_bands=16
@@ -905,7 +901,8 @@ class Simulator:
         self.r = 0.5 * self.h / PIXELS_PER_CELL
         self.L = L
 
-        self.IMAGE_SIZE = IMAGE_SIZE
+        self.IMAGE_W = IMAGE_W
+        self.IMAGE_H = IMAGE_H
         self.smooth = smooth
 
         self.gradient_strength = gradient_strength
@@ -971,8 +968,8 @@ class Simulator:
         self.next_du = wp.array(n_du, dtype=int, device="cuda")
         self.next_dd = wp.array(n_dd, dtype=int, device="cuda")
         # Image buffers (GPU) — pre-allocated once; reused in new_image() via wp.copy
-        self.pixels  = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda")
-        self.blurred = wp.zeros(self.IMAGE_SIZE * self.IMAGE_SIZE * 3, dtype=wp.uint8, device="cuda")
+        self.pixels  = wp.zeros(self.IMAGE_W * self.IMAGE_H * 3, dtype=wp.uint8, device="cuda")
+        self.blurred = wp.zeros(self.IMAGE_W * self.IMAGE_H * 3, dtype=wp.uint8, device="cuda")
 
         # Grid arrays
         self.G2 = self.G.x * self.G.y
@@ -994,7 +991,7 @@ class Simulator:
         self.p2g_weight = wp.zeros(self.G3, dtype=float, device="cuda")
 
         # CPU staging buffers — pre-allocated once to avoid per-call GPU malloc
-        img_flat = self.IMAGE_SIZE * self.IMAGE_SIZE * 3
+        img_flat = self.IMAGE_W * self.IMAGE_H * 3
         self._pixels_np  = np.zeros(img_flat, dtype=np.uint8)
         self._blurred_np = np.zeros(img_flat, dtype=np.uint8)
         self._grad_x_np  = np.zeros(self.G2, dtype=np.float32)
@@ -1004,7 +1001,7 @@ class Simulator:
         self._bands_gpu  = wp.zeros(num_bands, dtype=float, device="cuda")
 
         print(f"✓ SIM: simulator ready")
-        print(f"    Image({self.IMAGE_SIZE},{self.IMAGE_SIZE})")
+        print(f"    Image({self.IMAGE_W},{self.IMAGE_H})")
         print(f"    {self.particles:,} particles({PX_inner},{PY_inner},{L})")
         print(f"    {self.G3:,} cells in grid({self.G.x},{self.G.y},{self.G.z})")
 
@@ -1047,7 +1044,7 @@ class Simulator:
         self._compute_gradients(blurred)
 
         wp.launch(k_new_image, dim=self.particles, inputs=[
-            self.pixels, self.blurred, self.IMAGE_SIZE,
+            self.pixels, self.blurred, self.IMAGE_W, self.IMAGE_H,
             self.xyz_base, self.xyz_goal, self.rgb, self.rot, self.invmass,
             self.h, self.G, depth_factor
         ], device="cuda")

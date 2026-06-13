@@ -48,16 +48,17 @@ def _coerce_bytes(value):
         return base64.b64decode(value)
     raise TypeError(f"Unsupported binary type: {type(value).__name__}")
 
-def _square_crop_image(data: bytes, size: int) -> bytes:
+def _crop_image(data: bytes, iw: int, ih: int) -> bytes:
     img = Image.open(io.BytesIO(data))
     if img.mode != "RGB":
         img = img.convert("RGB")
     w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    img = img.crop((left, top, left + side, top + side))
-    img = img.resize((size, size), Image.LANCZOS)
+    scale = max(iw / w, ih / h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - iw) // 2
+    top = (new_h - ih) // 2
+    img = img.crop((left, top, left + iw, top + ih))
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     return buf.getvalue()
@@ -70,7 +71,7 @@ def _normalize_http_part(part):
 
     if kind == "image":
         raw = _coerce_bytes(part.get("data"))
-        processed = _square_crop_image(raw, Config.IMAGE_SIZE)
+        processed = _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H)
         return {
             "kind": "image",
             "mime_type": "image/jpeg",
@@ -93,7 +94,7 @@ def _normalize_http_payload_to_bus_message(payload):
                 "kind": "image",
                 "mime_type": "image/jpeg",
                 "purpose": payload.get("image_purpose", "input"),
-                "data": _square_crop_image(raw, Config.IMAGE_SIZE),
+                "data": _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H),
             })
     else:
         parts = [_normalize_http_part(part) for part in parts]

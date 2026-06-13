@@ -174,27 +174,6 @@ def overlay_fixed(frame, overlay_img, x0, y0):
     out[y0:y0+h, x0:x0+w] = (overlay_bgr * alpha + region * (1.0 - alpha)).astype(out.dtype)
     return out
 
-def resize_to_fit_window(img, window_w, window_h):
-    target_w = window_w
-    target_h = window_h
-
-    img_h, img_w = img.shape[:2]
-
-    # Scale to cover the whole target area
-    scale = max(float(target_w) / float(img_w), float(target_h) / float(img_h))
-    new_w = max(1, int(round(img_w * scale)))
-    new_h = max(1, int(round(img_h * scale)))
-
-    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-
-    # Center-crop to exact window size
-    x0 = max(0, (new_w - target_w) // 2)
-    y0 = max(0, (new_h - target_h) // 2)
-
-    frame = resized[y0:y0 + target_h, x0:x0 + target_w]
-
-    return frame
- 
 async def main():
     config = Config()
 
@@ -203,7 +182,8 @@ async def main():
 
     # Simulator setup
     sim = Simulator(
-        IMAGE_SIZE=config.IMAGE_SIZE,
+        IMAGE_W=config.IMAGE_W * 4,
+        IMAGE_H=config.IMAGE_H * 4,
         PIXELS_PER_CELL=config.PIXELS_PER_CELL,
         G=config.G, L=config.LAYERS,
         smooth=3,
@@ -214,9 +194,9 @@ async def main():
     sim_gradient_mode = 0
     sim_world_mode = 0
     img_a = cv2.imread(r"..\..\input\19.png")
-    img_a = cv2.resize(img_a, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+    img_a = cv2.resize(img_a, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
     img_a_hires = super.upscale(img_a)
-    sim.new_image(img_a)
+    sim.new_image(img_a_hires)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
     logo_overlay, logo_x0, logo_y0 = _compute_overlay_state(logo, 20, config.WINDOW_W, config.WINDOW_H, "bottom center")
     brand = Brand()
@@ -242,8 +222,7 @@ async def main():
     )
     ray_shape = 0
     fov_target = config.fov
-    frame = img_a.copy()
-    frames = deque()
+    frame = img_a_hires.copy()
     frames_hires = deque()
     pending_images = asyncio.Queue(maxsize=16)
     processing_task = None
@@ -337,80 +316,57 @@ async def main():
         await pending_images.put((nickname, image_bytes))
         print(f"✓ PC: queued image {kb} KB from {nickname}, pending queue size is now {pending_images.qsize()}")
 
-    def process_image_payload(ray_shape_value, image_bytes, start_img, start_img_hires):
+    def process_image_payload(image_bytes, start_img_hires):
         buf = np.frombuffer(image_bytes, dtype=np.uint8)
         img_b = cv2.imdecode(buf, cv2.IMREAD_COLOR)
         if img_b is None:
             return {"ok": False, "error": "✗ PC: failed to decode received image"}
 
-        img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-        if ray_shape_value == 5:
-            img_b = cv2.resize(img_b, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-            img_b_hires = super.upscale(img_b)
-            interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
-            generated_frames = [interp for interp in (interpolated or []) if interp is not None]
-            generated_frames.append(img_b_hires)
-            return {
-                "ok": True,
-                "mode": "hires",
-                "target": img_b_hires,
-                "frames": generated_frames,
-            }
-
-        interpolated = of.interpolate(start_img, img_b, config.OF_FRAMES)
+        img_b = cv2.resize(img_b, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+        img_b_hires = super.upscale(img_b)
+        interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
         generated_frames = [interp for interp in (interpolated or []) if interp is not None]
-        generated_frames.append(img_b)
+        generated_frames.append(img_b_hires)
         return {
             "ok": True,
-            "mode": "normal",
-            "target": img_b,
+            "target": img_b_hires,
             "frames": generated_frames,
         }
 
     async def kick_processing():
-        nonlocal img_a, img_a_hires, processing_task, ray_shape
+        nonlocal img_a_hires, processing_task
 
         if processing_task is not None and not processing_task.done():
             return
         if pending_images.empty():
             return
+        if len(frames_hires) >= config.OF_FRAMES * 2:
+            return  # throttle: let display drain before upscaling more
 
         nickname, image_bytes = await pending_images.get()
-        start_img = frames[-1] if frames else img_a
         start_img_hires = frames_hires[-1] if frames_hires else img_a_hires
         loop = asyncio.get_running_loop()
 
         async def runner():
-            nonlocal img_a, img_a_hires
+            nonlocal img_a_hires
             try:
                 result = await loop.run_in_executor(
                     processing_executor,
                     process_image_payload,
-                    ray_shape,
                     image_bytes,
-                    start_img,
                     start_img_hires,
                 )
                 if not result.get("ok"):
                     print(result.get("error", "✗ PC: image processing failed"))
                     return
 
-                if result["mode"] == "hires":
-                    for interp in result["frames"]:
-                        frames_hires.append(interp)
-                    img_a_hires = result["target"]
-                    print(
-                        f"✓ PC: processed hires image from {nickname}, appended {len(result['frames'])} frames, "
-                        f"hires queue size is now {len(frames_hires)}, pending queue {pending_images.qsize()}"
-                    )
-                else:
-                    for interp in result["frames"]:
-                        frames.append(interp)
-                    img_a = result["target"]
-                    print(
-                        f"✓ PC: processed image from {nickname}, appended {len(result['frames'])} frames, "
-                        f"queue size is now {len(frames)}, pending queue {pending_images.qsize()}"
-                    )
+                for interp in result["frames"]:
+                    frames_hires.append(interp)
+                img_a_hires = result["target"]
+                print(
+                    f"✓ PC: processed image from {nickname}, appended {len(result['frames'])} frames, "
+                    f"hires queue size is now {len(frames_hires)}, pending queue {pending_images.qsize()}"
+                )
             finally:
                 pending_images.task_done()
 
@@ -435,23 +391,12 @@ async def main():
 
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
-        nonlocal img_a, img_a_hires, brand_on
+        nonlocal img_a_hires, brand_on
 
         if 'shape' in params:
             new_shape = int(params['shape'])
             if new_shape != ray_shape:
-                if new_shape == 5:
-                    start_img = frames[-1] if frames else img_a
-                    img_a_hires = super.upscale(start_img)
-                    # Leftover hires frames from a previous flat-mode run would
-                    # play first and the next journey would chain off them.
-                    frames_hires.clear()
-                else:
-                    start_img = frames_hires[-1] if frames_hires else img_a_hires
-                    img_a = cv2.resize(start_img, (config.IMAGE_SIZE, config.IMAGE_SIZE), interpolation=cv2.INTER_AREA)
-                    frames.clear()
-                # In-flight images from the old mode would chain the new run
-                # off stale content — drop them.
+                # Flush stale in-flight images so the new mode chains off current state.
                 while not pending_images.empty():
                     try:
                         pending_images.get_nowait()
@@ -679,13 +624,9 @@ async def main():
         if now > next_ray_tick + ray_period:
             next_ray_tick = now + ray_period
 
-        if ray_shape == 5:
-            if frames_hires:
-                img_a_hires = frames_hires.popleft()
-        else:
-            if frames:
-                img_a = frames.popleft()
-                sim.new_image(img_a)
+        if frames_hires:
+            img_a_hires = frames_hires.popleft()
+            sim.new_image(img_a_hires, depth_factor=0.0 if director.mode == 'auto_gen' else 1.0)
 
         # Raytrace
         if ray_shape == 0:
@@ -700,7 +641,7 @@ async def main():
         elif ray_shape == 4:
             frame = ray.sphere(sim.xyz, sim.rgb, 4.0 * sim.r)
         else:
-            frame = resize_to_fit_window(img_a_hires, config.WINDOW_W, config.WINDOW_H)
+            frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
 
         if brand_on:
             frame = Brand.blend(frame, _brand_premul, _brand_inv_alpha)

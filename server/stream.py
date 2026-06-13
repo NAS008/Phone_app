@@ -18,9 +18,23 @@ from aiortc import (
     RTCSessionDescription,
     VideoStreamTrack,
 )
+import aiortc.codecs.vpx as _vpx
 from av import VideoFrame
 
+# aiortc 1.14 hard-caps VP8 at 1.5 Mbps; raise it so target_bitrate is honoured.
+_vpx.MAX_BITRATE = 80_000_000
+
 STUN_SERVERS = ["stun:stun.l.google.com:19302"]
+
+
+async def _apply_bitrate(sender, target_bitrate, retries=40, delay=0.05):
+    """Set VP8 encoder target_bitrate once the sender's encoder is running."""
+    for _ in range(retries):
+        enc = sender._RTCRtpSender__encoder  # created lazily after ICE/DTLS
+        if enc is not None:
+            enc.target_bitrate = target_bitrate
+            return
+        await asyncio.sleep(delay)
 
 def build_ice_servers(turn_url="", turn_username="", turn_password=""):
     servers = [RTCIceServer(urls=STUN_SERVERS)]
@@ -141,30 +155,26 @@ class StreamingServer:
         )
         self.pcs.add(pc)
 
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            print("Connection state:", pc.connectionState)
-            if pc.connectionState in ("failed", "closed", "disconnected"):
-                await pc.close()
-                self.pcs.discard(pc)
-
         track = CvVideoTrack(
             self.frame_bus,
             fallback_size=(self.H, self.W),
         )
         sender = pc.addTrack(track)
+        target_bitrate = self.target_bitrate
+
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            print("Connection state:", pc.connectionState)
+            if pc.connectionState == "connected":
+                asyncio.create_task(_apply_bitrate(sender, target_bitrate))
+            elif pc.connectionState in ("failed", "closed", "disconnected"):
+                await pc.close()
+                self.pcs.discard(pc)
 
         offer_desc = RTCSessionDescription(sdp=sdp, type=sdp_type)
         await pc.setRemoteDescription(offer_desc)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
-
-        # Raise VP8 bitrate — codec is negotiated only after setLocalDescription.
-        # Default ~900 kbps causes heavy macroblocking at this resolution.
-        params = sender.getParameters()
-        if params.encodings:
-            params.encodings[0].maxBitrate = self.target_bitrate
-            await sender.setParameters(params)
 
         return {
             "sdp": pc.localDescription.sdp,

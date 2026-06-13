@@ -11,7 +11,7 @@ class Config:
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 2560, 3840#, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 3840, 2160#, 2560#1920, 1080#024, 1024#2048, 2048#512, 512#1080, 1080#2160, 2160
     IMAGE_SIZE = 512
     GRID_SIZE = 128
     PIXELS_PER_CELL = 8#IMAGE_SIZE // GRID_SIZE
@@ -61,7 +61,7 @@ class Config:
     # Streaming
     stream_on = True
     STREAM_MAX_SIDE = 1920
-    STREAM_BITRATE = 80_000_000  # VP8 maxBitrate (int, not str) — 80 Mbps for 2560×3840@24fps
+    STREAM_BITRATE = 20_000_000   # VP8 target bitrate ceiling — WebRTC CC reduces this on limited links
     HOST_IP = "192.168.68.60"
     # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
     # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a

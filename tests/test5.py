@@ -1,3 +1,5 @@
+# Test branded overlay
+
 import cv2
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))

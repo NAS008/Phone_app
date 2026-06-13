@@ -15,7 +15,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from sd35 import Folder
+from ai import Folder
 
 async def main():
     config = Config()

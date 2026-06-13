@@ -284,7 +284,7 @@ async def main():
     streaming = None
     runner = None
     if config.stream_on:
-        frame_bus = FrameBus()
+        frame_bus = FrameBus(max_side=config.STREAM_MAX_SIDE)   # 0 = no downscale; pass full 2560×3840
         cloudflare_turn = CloudflareTurn(
             config.CF_TURN_KEY_ID, config.CF_TURN_API_TOKEN, config.CF_TURN_TTL
         )
@@ -303,6 +303,7 @@ async def main():
                 config.TURN_URL, config.TURN_USERNAME, config.TURN_PASSWORD
             ),
             turn_provider=cloudflare_turn.get_ice_servers if cloudflare_turn.enabled else None,
+            target_bitrate=config.STREAM_BITRATE,
         )
         # The LAN viewer is a debug convenience — webapp viewers connect via
         # bus-relayed signaling, which works even if this bind fails.

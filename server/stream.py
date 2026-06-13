@@ -104,7 +104,7 @@ class CvVideoTrack(VideoStreamTrack):
         return frame
 
 class StreamingServer:
-    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None):
+    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None, target_bitrate=80_000_000):
         self.frame_bus = frame_bus
         self.W = W
         self.H = H
@@ -117,6 +117,10 @@ class StreamingServer:
         # CloudflareTurn.get_ice_servers). Called per connection because the
         # credentials are short-lived; may block, so it runs in a thread.
         self.turn_provider = turn_provider
+        # maxBitrate ceiling for the VP8 encoder (aiortc default ~900 kbps causes heavy
+        # macroblocking). 80 Mbps = 0.34 bpp at 2560×3840@24fps — excellent quality.
+        # WebRTC congestion control will reduce the actual rate on limited networks.
+        self.target_bitrate = target_bitrate
         self.pcs = set()
 
     async def viewer(self, request):
@@ -148,12 +152,19 @@ class StreamingServer:
             self.frame_bus,
             fallback_size=(self.H, self.W),
         )
-        pc.addTrack(track)
+        sender = pc.addTrack(track)
 
         offer_desc = RTCSessionDescription(sdp=sdp, type=sdp_type)
         await pc.setRemoteDescription(offer_desc)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
+
+        # Raise VP8 bitrate — codec is negotiated only after setLocalDescription.
+        # Default ~900 kbps causes heavy macroblocking at this resolution.
+        params = sender.getParameters()
+        if params.encodings:
+            params.encodings[0].maxBitrate = self.target_bitrate
+            await sender.setParameters(params)
 
         return {
             "sdp": pc.localDescription.sdp,

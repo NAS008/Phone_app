@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import cv2
 import glob
 import random
@@ -358,6 +360,27 @@ class Gemini:
     #     except Exception as e:
     #         print(f"✗ Gemini edit_image error: {e}")
     #     return None
+
+    def generate_themes(self, topic: str) -> List[str]:
+        """Ask Gemini to generate 10 short image-generation prompts about a topic."""
+        prompt = (
+            f"Generate exactly 10 short, vivid image-generation prompts inspired by this theme: '{topic}'.\n"
+            "Each prompt must be 4-10 words, evocative, and suitable for a large-scale art installation.\n"
+            "Return only a JSON array of 10 strings, nothing else.\n"
+            "Example format: [\"colossal shell on the beach\", \"jellyfish beneath a hot air balloon\"]"
+        )
+        response = self.client.models.generate_content(
+            model=self.TEXT_MODEL,
+            contents=[prompt],
+        )
+        text = self._extract_text(response)
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if not match:
+            raise ValueError(f"Gemini returned no JSON array for themes: {text[:200]}")
+        themes = json.loads(match.group())
+        if not isinstance(themes, list) or not themes:
+            raise ValueError(f"Gemini returned invalid theme list: {themes}")
+        return [str(t) for t in themes[:10]]
 
 class Folder:
     def __init__(self, image_w, image_h, input_folder):

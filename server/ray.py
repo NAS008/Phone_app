@@ -740,24 +740,18 @@ def raytrace_pixel(
         if hit_id >= 0:
             hit_pt = ray_origin + ray_dir * closest_t
             normal = wp.vec3(0.0, 0.0, 1.0)
-
-            # flip if facing away from camera — keeps shading consistent
-            if wp.dot(normal, ray_dir) > 0.0:
-                normal = -normal
-
             light_dir = wp.normalize(light - hit_pt)
-            diffuse   = 0.6 * wp.pow(wp.max(0.0, wp.dot(normal, light_dir)), 4.0)
+            diffuse   = 0.6
             shadow_factor = float(1.0)
             if diffuse > 0.0:
                 if shadow_pixel(
                     xyz, r,
-                    hit_pt + normal * r * 0.1, light_dir, wp.length(light - hit_pt),
+                    hit_pt + normal * h * 0.1, light_dir, wp.length(light - hit_pt),
                     h, G, cell_start, cell_count, particle_ids
                 ):
                     shadow_factor = shadow
 
-            depth = wp.clamp(0.3 + 0.7 * (h + xyz[hit_id].z / (float(G.z) * 0.5 * h)), 0.0, 1.0)
-            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor) * depth
+            pixel = rgb[hit_id] * (ambient + diffuse * shadow_factor)
 
         accum_r += pixel[0]; accum_g += pixel[1]; accum_b += pixel[2]
 

@@ -437,6 +437,11 @@ async def main():
                 ray.fov = fov_target
             print(f"✓ PC: ray zoom target set to {fov_target:.1f}")
 
+        if 'director_themes' in params:
+            themes = params['director_themes']
+            if isinstance(themes, list) and themes:
+                director.set_themes(themes)
+
         if 'director_mode' in params:
             new_mode = params['director_mode']
             if new_mode == 'auto_play' and director.mode != 'auto_play':
@@ -562,6 +567,7 @@ async def main():
         bus, config,
         mouse_move_fn=lambda px, py: mouse.callback(cv2.EVENT_MOUSEMOVE, px, py, 0, None),
         session_getter=lambda: session.session_id,
+        backlog_getter=lambda: len(frames_hires) + pending_images.qsize(),
     )
     director.start()
     director.enable_auto_play()
@@ -666,18 +672,6 @@ async def main():
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):
             break
-        elif key == ord('d'):
-            current_mode = director.mode  # None | "auto_play" | "auto_gen"
-            if current_mode is None:
-                director.sync_from_state(ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, ray.fov)
-                director.enable_auto_play()
-                await bus.publish_settings(director_mode='auto_play')
-            elif current_mode == "auto_play":
-                director.enable_auto_gen()
-                await bus.publish_settings(director_mode='auto_gen')
-            else:  # auto_gen → user
-                # Director.disable() publishes the full state snapshot itself
-                director.disable()
 
     cv2.destroyAllWindows()
     if streaming is not None:

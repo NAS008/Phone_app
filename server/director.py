@@ -112,11 +112,12 @@ class Director:
          (0.67, 0.28), (0.74, 0.27)],
     ]
 
-    def __init__(self, bus, config, mouse_move_fn, session_getter):
+    def __init__(self, bus, config, mouse_move_fn, session_getter, backlog_getter=None):
         self.bus              = bus
         self.config           = config
         self._mouse_move_fn   = mouse_move_fn   # callable(px: int, py: int) -> None
         self._session_getter  = session_getter
+        self._backlog_getter  = backlog_getter  # () -> int, or None
 
         self._mode    = None   # None | "auto_play" | "auto_gen"
         self._tasks   = []
@@ -171,7 +172,8 @@ class Director:
         self._cancel_tasks()
         self._mode = "auto_gen"
         self._ray_shape   = 5
-        asyncio.ensure_future(self.bus.publish_settings(shape=5))
+        self._sim_go_back = True
+        asyncio.ensure_future(self.bus.publish_settings(shape=5, go_back_on=True))
         self._tasks = [asyncio.ensure_future(self._auto_gen_loop())]
         print("✓ Director: auto-gen started")
 
@@ -202,6 +204,12 @@ class Director:
         if ray_fov is not None:
             self._ray_fov = ray_fov
 
+    def set_themes(self, themes: list) -> None:
+        """Replace the active theme list (e.g. set by a user message in auto_gen mode)."""
+        if themes:
+            self._active_themes = list(themes)
+            print(f"✓ Director: theme list updated ({len(self._active_themes)} prompts)")
+
     def set_brand_on(self, brand_on, branded_themes=None):
         if brand_on and branded_themes:
             self._active_themes = list(branded_themes)
@@ -226,11 +234,12 @@ class Director:
             t = now - self._t0
             self._rule_mouse(now, t)
             self._rule_fov_zoom_auto_play(now, t)
-            self._rule_go_back(now, t)
+            self._sim_go_back = True
             self._rule_constraints(t)
             self._rule_gradient(t)
         elif self._mode == "auto_gen":
             self.ms_on = False
+            self._sim_go_back = True
 
         changed = {}
         if self._ray_shape != prev_shape:
@@ -269,9 +278,8 @@ class Director:
         if self._mode != "auto_gen":
             return
         self._ray_shape   = 5
-        self._sim_go_back = False
         self._sim_world   = 0
-        await self.bus.publish_settings(shape=5, go_back_on=False, world_mode=0)
+        await self.bus.publish_settings(shape=5, world_mode=0)
         print("✓ Director: flat mode locked for auto-gen")
 
         while self._mode == "auto_gen":
@@ -296,6 +304,9 @@ class Director:
         print("✓ Director: folder pick triggered")
 
     async def _generate_and_send_prompt(self):
+        if self._backlog_getter and self._backlog_getter() >= self.config.OF_FRAMES * 2:
+            print("⚠ Director: skipping prompt — display backlog too large")
+            return
         session_id = self._session_getter()
         if not session_id:
             return

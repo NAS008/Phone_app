@@ -385,7 +385,11 @@ def k_goal_force(
 ):
     tid = wp.tid()
 
-    xyz[tid] += (xyz_goal[tid] - xyz[tid]) * strength
+    d = xyz_goal[tid] - xyz[tid]
+    if d < 1e-6:
+        xyz[tid] = xyz_goal[tid]
+    else:    
+        xyz[tid] += d * strength
 
 @wp.kernel
 def k_base_id(
@@ -926,7 +930,7 @@ class Simulator:
         all_pos, all_nx, all_ny, all_nxx, all_nyy, all_ndu, all_ndd = [], [], [], [], [], [], []
         for k in range(self.L):
             offset = k * N_layer
-            jz = self.r * 0.1 * (np.random.rand(PY_inner, PX_inner) - 0.5)
+            jz = 0.0#self.r * 0.1 * (np.random.rand(PY_inner, PX_inner) - 0.5)
             pos_k = np.stack([
                 x0 + ii_grid * spacing,
                 y0 + jj_grid * spacing,

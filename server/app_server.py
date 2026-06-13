@@ -84,6 +84,7 @@ async def main():
     session_histories = {}
     pending_parts = {}
     ai_mode = 0
+    director_mode = 'user'
     brand_on = False
     last_generated_image_bgr = np.zeros((config.IMAGE_H, config.IMAGE_W, 3), dtype=np.uint8)
     last_sd_prompt = ""
@@ -173,7 +174,7 @@ async def main():
         print(f"✓ Server: user joined '{nickname}'")
 
     async def on_user_message(session_id, nickname, parts, payload):
-        nonlocal current_session_id, joined_users, ai_mode, last_generated_image_bgr, last_sd_prompt, current_style
+        nonlocal current_session_id, joined_users, ai_mode, director_mode, last_generated_image_bgr, last_sd_prompt, current_style
 
         if str(session_id) != str(current_session_id) and str(session_id) != config.ADMIN_SESSION_ID:
             print(f"✗ Server: ignored message from wrong session {session_id}")
@@ -208,6 +209,28 @@ async def main():
                 image_bytes=image_bytes, image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
+            return
+
+        # ── Auto-gen: real user sets theme via Gemini ────────────────────────
+        if director_mode == 'auto_gen' and nickname != 'Director':
+            text = extract_first_text(parts)
+            if text:
+                try:
+                    themes = await loop.run_in_executor(executor, lambda: gemini.generate_themes(text))
+                    await bus.publish_settings(director_themes=themes)
+                    await bus.publish_ai_message_to_phone(
+                        session_id=effective_session_id, nickname="NonCarbon Artist",
+                        text=f"Theme set to '{text}' — generating variations...",
+                        turn_id=turn_id,
+                    )
+                    print(f"✓ Server: auto_gen themes updated ({len(themes)} prompts) for '{text}'")
+                except Exception as e:
+                    print(f"✗ Server: theme generation failed: {e}")
+                    await bus.publish_ai_message_to_phone(
+                        session_id=effective_session_id, nickname="NonCarbon Artist",
+                        text="Couldn't update the theme right now. Try again.",
+                        turn_id=turn_id,
+                    )
             return
 
         session_key = str(effective_session_id)
@@ -485,9 +508,12 @@ async def main():
         print(f"✗ Server: unknown Gemini action {action}")
 
     async def on_settings(params):
-        nonlocal current_session_id, ai_mode, current_style, brand_on
+        nonlocal current_session_id, ai_mode, director_mode, current_style, brand_on
         if "session_id" in params and str(params["session_id"]) != str(current_session_id) and str(params["session_id"]) != config.ADMIN_SESSION_ID:
             return
+        if "director_mode" in params:
+            director_mode = str(params["director_mode"])
+            print(f"✓ Server: director_mode set to {director_mode}")
         if "mode" in params:
             ai_mode = int(params["mode"])
             ai_mode_txt = ""

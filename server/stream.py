@@ -15,6 +15,7 @@ from aiortc import (
     RTCConfiguration,
     RTCIceServer,
     RTCPeerConnection,
+    RTCRtpSender,
     RTCSessionDescription,
     VideoStreamTrack,
 )
@@ -131,7 +132,7 @@ class StreamingServer:
         # CloudflareTurn.get_ice_servers). Called per connection because the
         # credentials are short-lived; may block, so it runs in a thread.
         self.turn_provider = turn_provider
-        # maxBitrate ceiling for the VP8 encoder (aiortc default ~900 kbps causes heavy
+        # maxBitrate ceiling for the VP9 encoder (aiortc default ~900 kbps causes heavy
         # macroblocking). 80 Mbps = 0.34 bpp at 2560×3840@24fps — excellent quality.
         # WebRTC congestion control will reduce the actual rate on limited networks.
         self.target_bitrate = target_bitrate
@@ -160,6 +161,13 @@ class StreamingServer:
             fallback_size=(self.H, self.W),
         )
         sender = pc.addTrack(track)
+        # Prefer VP9 — better detail/bitrate than VP8 (larger transforms, superior prediction).
+        # Falls back to VP8 automatically if the browser doesn't offer VP9.
+        caps = RTCRtpSender.getCapabilities("video")
+        if caps:
+            vp9  = [c for c in caps.codecs if c.mimeType == "video/VP9"]
+            rest = [c for c in caps.codecs if c.mimeType != "video/VP9"]
+            pc.getTransceivers()[-1].setCodecPreferences(vp9 + rest)
         target_bitrate = self.target_bitrate
 
         @pc.on("connectionstatechange")

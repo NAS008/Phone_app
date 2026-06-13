@@ -32,9 +32,9 @@ class Config:
     background = [0.0, 0.0, 0.0]
     ambient = 0.6
     shadow = 0.3
-    FPS = 12
+    FPS = 8
     FPS_SIM = FPS * 2
-    SIM_SPEED = 0.5  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
+    SIM_SPEED = 0.1  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
     world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
@@ -61,7 +61,7 @@ class Config:
     # Streaming
     stream_on = True
     STREAM_MAX_SIDE = 0           # 0 is for the window resolution
-    STREAM_BITRATE = 80_000_000   # VP8 target bitrate ceiling — WebRTC CC reduces this on limited links
+    STREAM_BITRATE = 80_000_000   # VP9 target bitrate ceiling — WebRTC CC reduces this on limited links
     HOST_IP = "192.168.68.60"
     # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
     # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a
@@ -75,7 +75,7 @@ class Config:
     TURN_USERNAME = _os.environ.get('TURN_USERNAME', '')
     TURN_PASSWORD = _os.environ.get('TURN_PASSWORD', '')
     VIEWER_HTML = r"../tests/viewer.html"
-    GIF_DIFF_THRESHOLD = 2.0  # mean abs pixel diff (0-255) required to add a frame
+    GIF_DIFF_THRESHOLD = 3.0  # mean abs pixel diff (0-255) required to add a frame
 
     # Google
     GEMINI_API_KEY = __import__('os').environ.get('GEMINI_API_KEY', '')

@@ -291,7 +291,7 @@ async def main():
             ),
             turn_provider=cloudflare_turn.get_ice_servers if cloudflare_turn.enabled else None,
             target_bitrate=config.STREAM_BITRATE,
-            track_fps=config.FPS,
+            track_fps=30,
         )
         # The LAN viewer is a debug convenience — webapp viewers connect via
         # bus-relayed signaling, which works even if this bind fails.
@@ -796,7 +796,7 @@ async def main():
         if gif_changed:
             last_frames.append(thumb)
             gif_last_frame = thumb
-        if streaming is not None and gif_changed:
+        if streaming is not None:
             frame_bus.publish(frame)
 
         if overlay_on:

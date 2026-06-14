@@ -1216,7 +1216,7 @@ const appendFeed = useCallback((message) => {
                 }}
               >
                 {[
-                  "Botanical Lithograph","Art Nouveau Engraving","Deep-Sea Specimen",
+                  "None","Botanical Lithograph","Art Nouveau Engraving","Deep-Sea Specimen",
                   "Edo Woodblock","Medieval Manuscript","Bauhaus Geometric",
                   "Electron Microscope","Cyanotype","Charred Woodblock","Aztec Circuit",
                   "Soviet Constructivist","Alchemical Manuscript","Light Painting",

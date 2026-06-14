@@ -231,6 +231,7 @@ async def main():
     ray_painter = None
     painter_pending_bytes = None
     painter_busy = False
+    painter_done_notified = False
     processing_task = None
     processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     thumb_w = max(config.WINDOW_W // 8, 256)
@@ -302,7 +303,7 @@ async def main():
     await bus.connect()
 
     async def on_ai_message(session_id, nickname, parts, payload):
-        nonlocal painter_instance, painter_pending_bytes
+        nonlocal painter_instance, painter_pending_bytes, painter_done_notified
 
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
@@ -316,6 +317,7 @@ async def main():
         if ai_mode == 4:
             painter_instance = None
             painter_pending_bytes = image_bytes
+            painter_done_notified = False
             print(f"✓ PC: painter mode — new target image {kb} KB, previous painter reset")
             return
 
@@ -442,7 +444,7 @@ async def main():
             return p, rp
 
         async def runner():
-            nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy
+            nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy, painter_done_notified
             try:
                 p, rp = await loop.run_in_executor(processing_executor, init_painter, image_bytes)
                 if p is None:
@@ -450,6 +452,7 @@ async def main():
                     return
                 painter_instance = p
                 ray_painter = rp
+                painter_done_notified = False
                 print(f"✓ PC: painter ready — {p.particles:,} particles, {p.n_strokes} strokes")
             except Exception as exc:
                 print(f"✗ PC: painter init error — {exc}")
@@ -480,7 +483,7 @@ async def main():
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
         nonlocal img_a_hires, brand_on
-        nonlocal ai_mode, painter_instance, ray_painter, painter_pending_bytes
+        nonlocal ai_mode, painter_instance, ray_painter, painter_pending_bytes, painter_done_notified
 
         if 'mode' in params:
             new_mode = int(params['mode'])
@@ -490,6 +493,7 @@ async def main():
                     painter_instance = None
                     ray_painter = None
                     painter_pending_bytes = None
+                    painter_done_notified = False
                 print(f"✓ PC: ai_mode set to {ai_mode}")
 
         if 'shape' in params:
@@ -735,8 +739,19 @@ async def main():
             if painter_instance is not None:
                 if not painter_instance.done:
                     painter_instance.update()
-                else:
-                    painter_instance = None  # strokes exhausted; keep last frame on screen
+                elif not painter_done_notified:
+                    # All strokes done — send final frame to phone, then idle
+                    painter_done_notified = True
+                    out_final = overlay_fixed(frame, logo_overlay, logo_x0, logo_y0)
+                    final_bytes = get_image_bytes(out_final)
+                    await bus.publish_ai_message_to_phone(
+                        session_id=session.session_id,
+                        nickname="NonCarbon Artist",
+                        text="Your painting is ready to share!",
+                        image_bytes=final_bytes,
+                    )
+                    print(f"✓ PC: painter done — sent final image {len(final_bytes) // 1024} KB to phone")
+                    painter_instance = None  # keep last frame; wait for new image
             if painter_instance is not None and ray_painter is not None:
                 frame = ray_painter.sphere(painter_instance.xyz, painter_instance.rgb, 3.0 * painter_instance.r)
             # else: keep last frame

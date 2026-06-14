@@ -259,28 +259,21 @@ const Loader = ({
 
                 {error && <div className="claim-error">{error}</div>}
 
-                {/* ── Lower box: static session display OR editable session input ── */}
-                {isAdminTyped ? (
-                  <>
-                    <input
-                      id="admin-session"
-                      ref={adminSessionRef}
-                      type="text"
-                      value={adminSessionInput}
-                      onChange={(e) => {
-                        setAdminSessionInput(e.target.value);
-                        setError(null);
-                      }}
-                      placeholder="Paste session ID here"
-                      disabled={isSubmitting}
-                      className="claim-input"
-                    />
-                  </>
-                ) : (
-                  <div className="claim-session-panel">
-                    <span className="claim-session-label">Session</span>
-                    <span className="claim-session-id">{sessionId}</span>
-                  </div>
+                {/* ── Lower box: password input for admin only ── */}
+                {isAdminTyped && (
+                  <input
+                    id="admin-session"
+                    ref={adminSessionRef}
+                    type="password"
+                    value={adminSessionInput}
+                    onChange={(e) => {
+                      setAdminSessionInput(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="Enter password"
+                    disabled={isSubmitting}
+                    className="claim-input"
+                  />
                 )}
 
                 <button

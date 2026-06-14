@@ -564,7 +564,7 @@ class Painter:
 
         # All particles at floor level, black — invisible against black background
         x_world = (px_grid + 0.5) * h_cell
-        y_world = (py_grid + 0.5) * h_cell
+        y_world = (H - 1 - py_grid + 0.5) * h_cell   # Y-up: row 0 = top of image = large y
         z_world = np.full((H, W), self.z_active, dtype=np.float32)
 
         xyz_np = np.stack([x_world, y_world, z_world], axis=-1).reshape(-1, 3)

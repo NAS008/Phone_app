@@ -385,6 +385,37 @@ async def main():
             )
             return
 
+        # ── Mode 4: Painter — generate image directly, no conversation ──────
+        if ai_mode == 4:
+            try:
+                result = await loop.run_in_executor(executor, lambda: gemini.handle(effective_parts, history=None, force_generate=True))
+            except GeminiBlockedError as e:
+                print(f"✗ Server: Gemini blocked ({e.reason}): {e.user_message}")
+                await _publish_error(effective_session_id, e.user_message, turn_id)
+                return
+            except Exception as e:
+                print(f"✗ Server: Gemini handle failed for painter mode: {e}")
+                return
+
+            image_part = extract_first_image(result.get("parts", []))
+            if not image_part:
+                print("✗ Server: painter mode — Gemini returned no image")
+                return
+
+            new_bgr = jpeg_to_bgr(image_part["data"])
+            if new_bgr is None:
+                return
+            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+            last_generated_image_bgr = new_bgr
+            image_bytes = bgr_to_jpeg(new_bgr)
+            print(f"✓ Server: painter mode — Gemini image {len(image_bytes) // 1024} KB — {result.get('prompt', '')}")
+            await bus.publish_ai_message_to_pc(
+                session_id=effective_session_id, nickname="NonCarbon Artist",
+                image_bytes=image_bytes, image_mime_type="image/jpeg",
+                image_purpose="output", turn_id=turn_id,
+            )
+            return
+
         # ── Modes 0 and 1: Gemini first ──────────────────────────────────────
         try:
             is_director = (nickname == "Director")

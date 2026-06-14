@@ -109,6 +109,11 @@ class Config:
     OF_FRAMES = 10
 
     STYLE = {
+        "None": {
+            "name": "None",
+            "short": "",
+            "long": "faithful photograph, natural colors, accurate detail, realistic lighting, no artistic style or transformation"
+        },
         "Botanical Lithograph": {
             "name": "Botanical Lithograph",
             "short": "in style of botanical lithograph, engraved linework, pale salmon, dusty rose, muted sage green",

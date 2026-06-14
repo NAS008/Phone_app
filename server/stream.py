@@ -6,12 +6,15 @@
 #     frame_bus.publish(frame)
 
 import asyncio
+import fractions
 import threading
+import time
 from pathlib import Path
 import cv2
 import numpy as np
 from aiohttp import web
 from aiortc import (
+    MediaStreamError,
     RTCConfiguration,
     RTCIceServer,
     RTCPeerConnection,
@@ -26,6 +29,7 @@ from av import VideoFrame
 _vpx.MAX_BITRATE = 80_000_000
 
 STUN_SERVERS = ["stun:stun.l.google.com:19302"]
+_VIDEO_CLOCK_RATE = 90_000
 
 
 async def _apply_bitrate(sender, target_bitrate, retries=40, delay=0.05):
@@ -90,9 +94,10 @@ class FrameBus:
             return self._frame.copy()
 
 class CvVideoTrack(VideoStreamTrack):
-    def __init__(self, bus, fallback_size=(720, 1280)):
+    def __init__(self, bus, fallback_size=(720, 1280), fps=30):
         super().__init__()
         self.bus = bus
+        self._ptime = 1.0 / max(1, fps)
         h, w = fallback_size
         side = max(h, w)
         if bus._max_side > 0 and side > bus._max_side:
@@ -100,6 +105,19 @@ class CvVideoTrack(VideoStreamTrack):
             h = max(2, int(h * scale) // 2 * 2)
             w = max(2, int(w * scale) // 2 * 2)
         self.last = np.zeros((h, w, 3), dtype=np.uint8)
+
+    async def next_timestamp(self):
+        if self.readyState != "live":
+            raise MediaStreamError
+        if hasattr(self, "_timestamp"):
+            self._timestamp += int(_VIDEO_CLOCK_RATE * self._ptime)
+            wait = self._start + (self._timestamp / _VIDEO_CLOCK_RATE) - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+        else:
+            self._start = time.time()
+            self._timestamp = 0
+        return self._timestamp, fractions.Fraction(1, _VIDEO_CLOCK_RATE)
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
@@ -119,7 +137,7 @@ class CvVideoTrack(VideoStreamTrack):
         return frame
 
 class StreamingServer:
-    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None, target_bitrate=80_000_000):
+    def __init__(self, frame_bus, W, H, viewer_html, host="0.0.0.0", port=8080, max_viewers=8, ice_servers=None, turn_provider=None, target_bitrate=80_000_000, track_fps=30):
         self.frame_bus = frame_bus
         self.W = W
         self.H = H
@@ -136,6 +154,7 @@ class StreamingServer:
         # macroblocking). 80 Mbps = 0.34 bpp at 2560×3840@24fps — excellent quality.
         # WebRTC congestion control will reduce the actual rate on limited networks.
         self.target_bitrate = target_bitrate
+        self.track_fps = track_fps
         self.pcs = set()
 
     async def viewer(self, request):
@@ -159,6 +178,7 @@ class StreamingServer:
         track = CvVideoTrack(
             self.frame_bus,
             fallback_size=(self.H, self.W),
+            fps=self.track_fps,
         )
         sender = pc.addTrack(track)
         # Prefer VP9 — better detail/bitrate than VP8 (larger transforms, superior prediction).

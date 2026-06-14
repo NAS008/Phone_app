@@ -234,6 +234,7 @@ async def main():
     painter_done_notified = False
     processing_task = None
     processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    painter_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     thumb_w = max(config.WINDOW_W // 8, 256)
     thumb_h = int(thumb_w * config.WINDOW_H / config.WINDOW_W)
     last_frames = deque(maxlen=config.FPS * config.VIDEO_SECONDS)
@@ -290,6 +291,7 @@ async def main():
             ),
             turn_provider=cloudflare_turn.get_ice_servers if cloudflare_turn.enabled else None,
             target_bitrate=config.STREAM_BITRATE,
+            track_fps=config.FPS,
         )
         # The LAN viewer is a debug convenience — webapp viewers connect via
         # bus-relayed signaling, which works even if this bind fails.
@@ -684,6 +686,7 @@ async def main():
     # Time cadence
     ray_period = 1.0 / config.FPS
     sim_period = 1.0 / config.FPS_SIM
+    loop = asyncio.get_running_loop()
     now = time.perf_counter()
     next_ray_tick = now
     next_sim_tick = now
@@ -744,7 +747,7 @@ async def main():
             await kick_painter_init()
             if painter_instance is not None:
                 if not painter_instance.done:
-                    painter_instance.update()
+                    await loop.run_in_executor(painter_executor, painter_instance.update)
                 elif not painter_done_notified:
                     # All strokes done — send final frame to phone, then idle
                     painter_done_notified = True
@@ -818,6 +821,7 @@ async def main():
     if processing_task is not None:
         await asyncio.gather(processing_task, return_exceptions=True)
     processing_executor.shutdown(wait=False, cancel_futures=True)
+    painter_executor.shutdown(wait=False, cancel_futures=True)
     await bus.close()
 
 if __name__ == '__main__':

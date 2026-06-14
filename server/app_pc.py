@@ -319,6 +319,12 @@ async def main():
             painter_pending_bytes = image_bytes
             painter_done_notified = False
             print(f"✓ PC: painter mode — new target image {kb} KB, previous painter reset")
+            await bus.publish_ai_message_to_phone(
+                session_id=session.session_id,
+                nickname="NonCarbon Artist",
+                text="Here's your AI-generated image — painting it now...",
+                image_bytes=image_bytes,
+            )
             return
 
         if pending_images.full():

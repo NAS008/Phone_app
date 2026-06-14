@@ -386,9 +386,9 @@ def k_goal_force(
     tid = wp.tid()
 
     d = xyz_goal[tid] - xyz[tid]
-    if d < 1e-6:
+    if wp.length(d) < 1e-4:
         xyz[tid] = xyz_goal[tid]
-    else:    
+    else:
         xyz[tid] += d * strength
 
 @wp.kernel

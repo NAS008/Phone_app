@@ -51,6 +51,7 @@ from session import Session
 from ray import RayTracer
 from ai import OpticalFlow, SuperResolution
 from sim import Simulator
+from painter import Painter
 from ui import Camera, Mic, Mouse
 from director import Director
 from stream import FrameBus, StreamingServer, build_ice_servers
@@ -225,6 +226,11 @@ async def main():
     frame = img_a_hires.copy()
     frames_hires = deque()
     pending_images = asyncio.Queue(maxsize=16)
+    ai_mode = 0
+    painter_instance = None
+    ray_painter = None
+    painter_pending_bytes = None
+    painter_busy = False
     processing_task = None
     processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     thumb_w = max(config.WINDOW_W // 8, 256)
@@ -296,6 +302,8 @@ async def main():
     await bus.connect()
 
     async def on_ai_message(session_id, nickname, parts, payload):
+        nonlocal painter_instance, painter_pending_bytes
+
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
 
@@ -304,6 +312,12 @@ async def main():
             return
 
         kb = int(len(image_bytes) / 1024)
+
+        if ai_mode == 4:
+            painter_instance = None
+            painter_pending_bytes = image_bytes
+            print(f"✓ PC: painter mode — new target image {kb} KB, previous painter reset")
+            return
 
         if pending_images.full():
             try:
@@ -371,7 +385,81 @@ async def main():
                 pending_images.task_done()
 
         processing_task = asyncio.create_task(runner())
-       
+
+    async def kick_painter_init():
+        nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy
+
+        if painter_busy:
+            return
+        if painter_pending_bytes is None:
+            return
+
+        image_bytes = painter_pending_bytes
+        painter_pending_bytes = None
+        painter_busy = True
+        loop = asyncio.get_running_loop()
+
+        def init_painter(img_bytes):
+            buf = np.frombuffer(img_bytes, dtype=np.uint8)
+            img_bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            if img_bgr is None:
+                return None, None
+            G_painter = [config.G[0], config.G[1], 4]
+            p = Painter(
+                canvas_w        = config.WINDOW_W,
+                canvas_h        = config.WINDOW_H,
+                population      = 1024,
+                n_strokes       = 1000,
+                gens_per_stroke = 60,
+                elite_n         = 20,
+                mutation_rate   = 0.05,
+                n_colors        = 256,
+                max_brush_hw    = 32,
+                stroke_alpha    = 0.95,
+                seed_frac       = 0.6,
+                explore_r       = 0.20,
+                max_dim         = 386,
+                impasto_dz_frac = 0.3,
+                device          = "cuda",
+            )
+            p.init_image(img_bgr)
+            p.init_brush(r"..\..\brand\brush03.png")
+            p.init_canvas()
+            rp = RayTracer(
+                W           = config.WINDOW_W,
+                H           = config.WINDOW_H,
+                G           = G_painter,
+                camera      = config.camera,
+                target      = config.target,
+                light       = config.light,
+                fov         = config.fov,
+                samples     = config.samples,
+                background  = config.background,
+                ambient     = config.ambient,
+                shadow      = config.shadow,
+                n_particles = p.particles,
+            )
+            return p, rp
+
+        async def runner():
+            nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy
+            try:
+                p, rp = await loop.run_in_executor(processing_executor, init_painter, image_bytes)
+                if p is None:
+                    print("✗ PC: painter init — failed to decode image")
+                    return
+                painter_instance = p
+                ray_painter = rp
+                print(f"✓ PC: painter ready — {p.particles:,} particles, {p.n_strokes} strokes")
+            except Exception as exc:
+                print(f"✗ PC: painter init error — {exc}")
+            finally:
+                painter_busy = False
+                if painter_pending_bytes is not None:
+                    asyncio.create_task(kick_painter_init())
+
+        asyncio.create_task(runner())
+
     async def on_user_like(session_id, nickname):
         nonlocal frame
 
@@ -392,6 +480,17 @@ async def main():
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
         nonlocal img_a_hires, brand_on
+        nonlocal ai_mode, painter_instance, ray_painter, painter_pending_bytes
+
+        if 'mode' in params:
+            new_mode = int(params['mode'])
+            if new_mode != ai_mode:
+                ai_mode = new_mode
+                if ai_mode != 4:
+                    painter_instance = None
+                    ray_painter = None
+                    painter_pending_bytes = None
+                print(f"✓ PC: ai_mode set to {ai_mode}")
 
         if 'shape' in params:
             new_shape = int(params['shape'])
@@ -588,66 +687,79 @@ async def main():
             # mouse state and the fov lerp are applied directly here.
             ray.fov += (fov_target - ray.fov) * 0.1
 
-        sim_step_count = 0
-        while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
-            # UI
-            if director.enabled:
-                if director.ms_on:
-                    pos = mouse.pos.copy()
-                    pos[2] = sim.h + sim.r
-                    sim.inject_mouse(pos, mouse.vel)
-            else:
-                if cam is not None:
-                    if cam.update(now):
-                        sim.inject_mouse(cam.pos, cam.vel)
-                if mouse is not None:
-                    if mouse.update(now):
-                        sim.inject_mouse(mouse.pos, mouse.vel)
-                if mic is not None:
-                    bands, flux = mic.update()
-                    if bands is not None:
-                        sim.inject_audio(bands, flux)
-            # Simulate
-            sim.update_flip(
-                go_back_on=sim_go_back_on,
-                constraints_mode=sim_constraints_mode,
-                gradient_mode=sim_gradient_mode,
-                world_mode = sim_world_mode, world_center=config.world_center, world_radius=config.world_radius
-            )
-            sim_step_count += 1
-            next_sim_tick += sim_period
-        # If we fell too far behind, drop backlog instead of spiraling
-        if now > next_sim_tick + sim_period * config.MAX_SIM_STEPS_PER_LOOP:
-            next_sim_tick = now + sim_period
+        if ai_mode != 4:
+            sim_step_count = 0
+            while now >= next_sim_tick and sim_step_count < config.MAX_SIM_STEPS_PER_LOOP:
+                # UI
+                if director.enabled:
+                    if director.ms_on:
+                        pos = mouse.pos.copy()
+                        pos[2] = sim.h + sim.r
+                        sim.inject_mouse(pos, mouse.vel)
+                else:
+                    if cam is not None:
+                        if cam.update(now):
+                            sim.inject_mouse(cam.pos, cam.vel)
+                    if mouse is not None:
+                        if mouse.update(now):
+                            sim.inject_mouse(mouse.pos, mouse.vel)
+                    if mic is not None:
+                        bands, flux = mic.update()
+                        if bands is not None:
+                            sim.inject_audio(bands, flux)
+                # Simulate
+                sim.update_flip(
+                    go_back_on=sim_go_back_on,
+                    constraints_mode=sim_constraints_mode,
+                    gradient_mode=sim_gradient_mode,
+                    world_mode = sim_world_mode, world_center=config.world_center, world_radius=config.world_radius
+                )
+                sim_step_count += 1
+                next_sim_tick += sim_period
+            # If we fell too far behind, drop backlog instead of spiraling
+            if now > next_sim_tick + sim_period * config.MAX_SIM_STEPS_PER_LOOP:
+                next_sim_tick = now + sim_period
         # Raytrace only on visual FPS cadence
         if now < next_ray_tick:
             await asyncio.sleep(min(next_ray_tick - now, sim_period))
             continue
         # ── at ray FPS: poll bus and start any pending image processing ──
         await bus.poll(timeout=0)
-        await kick_processing()
         next_ray_tick += ray_period
         if now > next_ray_tick + ray_period:
             next_ray_tick = now + ray_period
 
-        if frames_hires:
-            img_a_hires = frames_hires.popleft()
-            sim.new_image(img_a_hires, depth_factor=0.0 if director.mode == 'auto_gen' else 1.0)
-
-        # Raytrace
-        if ray_shape == 0:
-            frame = ray.triangle(sim.xyz, sim.rgb, sim.next_x, sim.next_y)
-        elif ray_shape == 1:
-            frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 5.0 * sim.r)
-        elif ray_shape == 2:
-            frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 3.0 * sim.r, 3.0 * sim.r, 0.5 * sim.r)  
-            #frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
-        elif ray_shape == 3:
-            frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
-        elif ray_shape == 4:
-            frame = ray.sphere(sim.xyz, sim.rgb, 4.0 * sim.r)
+        # ── painter mode ──
+        if ai_mode == 4:
+            await kick_painter_init()
+            if painter_instance is not None:
+                if not painter_instance.done:
+                    painter_instance.update()
+                else:
+                    painter_instance = None  # strokes exhausted; keep last frame on screen
+            if painter_instance is not None and ray_painter is not None:
+                frame = ray_painter.sphere(painter_instance.xyz, painter_instance.rgb, 3.0 * painter_instance.r)
+            # else: keep last frame
         else:
-            frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
+            await kick_processing()
+
+            if frames_hires:
+                img_a_hires = frames_hires.popleft()
+                sim.new_image(img_a_hires, depth_factor=0.0 if director.mode == 'auto_gen' else 1.0)
+
+            # Raytrace
+            if ray_shape == 0:
+                frame = ray.triangle(sim.xyz, sim.rgb, sim.next_x, sim.next_y)
+            elif ray_shape == 1:
+                frame = ray.prism(sim.xyz, sim.rgb, sim.rot, 1.0 * sim.r, 1.0 * sim.r, 5.0 * sim.r)
+            elif ray_shape == 2:
+                frame = ray.ellipsoid(sim.xyz, sim.rgb, sim.rot, 3.0 * sim.r, 3.0 * sim.r, 0.5 * sim.r)
+            elif ray_shape == 3:
+                frame = ray.cylinder(sim.xyz, sim.rgb, sim.next_y, 0.5 * sim.r)
+            elif ray_shape == 4:
+                frame = ray.sphere(sim.xyz, sim.rgb, 4.0 * sim.r)
+            else:
+                frame = ray.pixel(sim.xyz, sim.rgb, 1.0 * sim.r)
 
         if brand_on:
             frame = Brand.blend(frame, _brand_premul, _brand_inv_alpha)

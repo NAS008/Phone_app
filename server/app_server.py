@@ -525,6 +525,8 @@ async def main():
                 ai_mode_txt = "AnimateDiff"
             elif ai_mode == 3:
                 ai_mode_txt = "SD"
+            elif ai_mode == 4:
+                ai_mode_txt = "Painter"
             print(f"✓ Server: ai_mode set to {ai_mode_txt}")
         if "style_index" in params:
             idx = int(params["style_index"])

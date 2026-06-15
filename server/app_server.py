@@ -414,6 +414,12 @@ async def main():
                 image_bytes=image_bytes, image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
+            await bus.publish_ai_message_to_phone(
+                session_id=effective_session_id, nickname="NonCarbon Artist",
+                text="Here's your AI-generated image — painting it now...",
+                image_bytes=image_bytes, image_mime_type="image/jpeg",
+                image_purpose="output", turn_id=turn_id,
+            )
             return
 
         # ── Modes 0 and 1: Gemini first ──────────────────────────────────────

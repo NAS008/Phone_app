@@ -10,7 +10,7 @@ class Config:
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 2048, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 2048, 1152#2048#512, 512#1080, 1080#2160, 2160
     IMAGE_W = (WINDOW_W // 4) // 16 * 16
     IMAGE_H = (WINDOW_H // 4) // 16 * 16
     GRID_SIZE = 128
@@ -33,7 +33,7 @@ class Config:
     background = [0.0, 0.0, 0.0]
     ambient = 0.6
     shadow = 0.3
-    FPS = 8
+    FPS = 12
     FPS_SIM = FPS * 2
     SIM_SPEED = 0.1  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS

@@ -291,7 +291,7 @@ async def main():
             ),
             turn_provider=cloudflare_turn.get_ice_servers if cloudflare_turn.enabled else None,
             target_bitrate=config.STREAM_BITRATE,
-            track_fps=30,
+            track_fps=config.FPS_SIM,
         )
         # The LAN viewer is a debug convenience — webapp viewers connect via
         # bus-relayed signaling, which works even if this bind fails.
@@ -321,12 +321,6 @@ async def main():
             painter_pending_bytes = image_bytes
             painter_done_notified = False
             print(f"✓ PC: painter mode — new target image {kb} KB, previous painter reset")
-            await bus.publish_ai_message_to_phone(
-                session_id=session.session_id,
-                nickname="NonCarbon Artist",
-                text="Here's your AI-generated image — painting it now...",
-                image_bytes=image_bytes,
-            )
             return
 
         if pending_images.full():

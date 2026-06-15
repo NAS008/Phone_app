@@ -413,7 +413,7 @@ async def main():
                 canvas_w        = config.WINDOW_W,
                 canvas_h        = config.WINDOW_H,
                 population      = 1024,
-                n_strokes       = 1000,
+                n_strokes       = 500,
                 gens_per_stroke = 60,
                 elite_n         = 20,
                 mutation_rate   = 0.05,
@@ -743,17 +743,29 @@ async def main():
                 if not painter_instance.done:
                     await loop.run_in_executor(painter_executor, painter_instance.update)
                 elif not painter_done_notified:
-                    # All strokes done — send final frame to phone, then idle
                     painter_done_notified = True
                     out_final = overlay_fixed(frame, logo_overlay, logo_x0, logo_y0)
-                    final_bytes = get_image_bytes(out_final)
-                    await bus.publish_ai_message_to_phone(
-                        session_id=session.session_id,
-                        nickname="NonCarbon Artist",
-                        text="Your painting is ready to share!",
-                        image_bytes=final_bytes,
-                    )
-                    print(f"✓ PC: painter done — sent final image {len(final_bytes) // 1024} KB to phone")
+                    final_bytes = get_image_bytes(out_final, image_size=512)
+                    kb = len(final_bytes) // 1024
+                    print(f"✓ PC: painter done — uploading final image {kb} KB to phone via HTTP")
+                    qs = urllib.parse.urlencode({
+                        "session_id": session.session_id,
+                        "nickname": "NonCarbon Artist",
+                        "text": "Your painting is ready to share!",
+                    })
+                    upload_url = f"{config.PHONE_BACKEND_URL}/api/image_upload?{qs}"
+                    def _upload_painting(data=final_bytes, url=upload_url):
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "image/jpeg", "Content-Length": str(len(data))},
+                        )
+                        with urllib.request.urlopen(req, timeout=60) as resp:
+                            return resp.read()
+                    try:
+                        result = await loop.run_in_executor(None, _upload_painting)
+                        print(f"✓ PC: painter done — image uploaded to phone ({kb} KB)")
+                    except Exception as exc:
+                        print(f"✗ PC: painter done — HTTP upload failed: {exc}")
                     painter_instance = None  # keep last frame; wait for new image
             if painter_instance is not None and ray_painter is not None:
                 frame = ray_painter.sphere(painter_instance.xyz, painter_instance.rgb, 3.0 * painter_instance.r)

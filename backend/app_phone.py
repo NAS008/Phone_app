@@ -336,6 +336,13 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": str(exc)}, status=500)
             return
 
+        if parsed.path == "/api/image_upload":
+            try:
+                self.handle_image_upload(parsed)
+            except Exception as exc:
+                self.send_json({"success": False, "error": str(exc)}, status=500)
+            return
+
         try:
             payload = self.parse_body()
 
@@ -456,6 +463,41 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             "text": text,
             "parts": [],
             "video_url": f"/api/video?t={_now_ms()}",
+        }
+        self.server.message_store.add(message)
+        self.send_json({"success": True, "kb": kb})
+
+    def handle_image_upload(self, parsed):
+        params = urllib.parse.parse_qs(parsed.query)
+        session_id = (params.get("session_id", [None])[0]) or ""
+        nickname   = (params.get("nickname",   ["NonCarbon Artist"])[0])
+        text       = (params.get("text",       [""])[0])
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        image_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+        if not image_bytes:
+            self.send_json({"success": False, "error": "No image data received"}, status=400)
+            return
+
+        mime = (self.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        kb = len(image_bytes) // 1024
+        print(f"✓ Phone: image uploaded via HTTP ({kb} KB)")
+
+        message = {
+            "v": 1,
+            "id": None,
+            "session_id": session_id,
+            "nickname": nickname,
+            "role": "assistant",
+            "turn_id": None,
+            "final": True,
+            "received_at_ms": _now_ms(),
+            "text": text,
+            "parts": [],
+            "image_base64": image_base64,
+            "image_mime_type": mime,
+            "image_purpose": "output",
         }
         self.server.message_store.add(message)
         self.send_json({"success": True, "kb": kb})

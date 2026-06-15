@@ -28,7 +28,7 @@ async def main():
         canvas_w        = config.WINDOW_W,
         canvas_h        = config.WINDOW_H,
         population      = 1024,
-        n_strokes       = 1000,
+        n_strokes       = 500,
         gens_per_stroke = 60,
         elite_n         = 20,
         mutation_rate   = 0.05,
@@ -89,7 +89,7 @@ async def main():
 
         # Raytrace current particle state and display
         frame = ray.sphere(painter.xyz, painter.rgb, 3.0 * painter.r)
-        cv2.imshow(config.APP_NAME, cv2.flip(frame, 0))
+        cv2.imshow(config.APP_NAME, frame)
 
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):

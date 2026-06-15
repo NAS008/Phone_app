@@ -631,6 +631,12 @@ class Painter:
         self.rgb       : wp.array | None = None
         self.rot       : wp.array | None = None
         self.p_active  : wp.array | None = None
+        self.n_x       : wp.array | None = None
+        self.n_y       : wp.array | None = None
+        self.n_xx      : wp.array | None = None
+        self.n_yy      : wp.array | None = None
+        self.n_du      : wp.array | None = None
+        self.n_dd      : wp.array | None = None
         self.r         : float = 0.0
         self.z_active  : float = 0.0
         self.impasto_dz: float = 0.0
@@ -775,6 +781,16 @@ class Painter:
         self.rgb      = wp.array(rgb_np, dtype=wp.vec3,  device=self.device)
         self.rot      = wp.array(rot_np, dtype=wp.vec3,  device=self.device)
         self.p_active = wp.array(act_np, dtype=wp.int32, device=self.device)
+
+        ii_grid, jj_grid = np.meshgrid(np.arange(W, dtype=np.int32),
+                                        np.arange(H, dtype=np.int32))
+        linear = jj_grid * W + ii_grid
+        self.n_x  = wp.array(np.where(ii_grid < W - 1, linear + 1,         -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
+        self.n_y  = wp.array(np.where(jj_grid < H - 1, linear + W,         -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
+        self.n_xx = wp.array(np.where(ii_grid < W - 2, linear + 2,         -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
+        self.n_yy = wp.array(np.where(jj_grid < H - 2, linear + 2 * W,     -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
+        self.n_du = wp.array(np.where((ii_grid < W-1) & (jj_grid < H-1), linear + 1 + W, -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
+        self.n_dd = wp.array(np.where((ii_grid < W-1) & (jj_grid > 0),   linear + 1 - W, -1).ravel().astype(np.int32), dtype=wp.int32, device=self.device)
 
         self._step = 0
         print(f"[Painter] Ready  lo {W}×{H}  hi {HW}×{HH}  "

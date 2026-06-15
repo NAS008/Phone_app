@@ -14,7 +14,7 @@ class Config:
     IMAGE_W = (WINDOW_W // 4) // 16 * 16
     IMAGE_H = (WINDOW_H // 4) // 16 * 16
     GRID_SIZE = 128
-    PIXELS_PER_CELL = 4#max(IMAGE_W, IMAGE_H) // GRID_SIZE
+    PIXELS_PER_CELL = 8#max(IMAGE_W, IMAGE_H) // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
     if aspect >= 1.0:
         GX = GRID_SIZE

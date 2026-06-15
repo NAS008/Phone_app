@@ -231,7 +231,6 @@ async def main():
     ray_painter = None
     painter_pending_bytes = None
     painter_busy = False
-    painter_done_notified = False
     processing_task = None
     processing_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     painter_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -305,7 +304,7 @@ async def main():
     await bus.connect()
 
     async def on_ai_message(session_id, nickname, parts, payload):
-        nonlocal painter_instance, painter_pending_bytes, painter_done_notified
+        nonlocal painter_instance, painter_pending_bytes
 
         if session_id != session.session_id and session_id != config.ADMIN_SESSION_ID:
             return
@@ -319,7 +318,6 @@ async def main():
         if ai_mode == 4:
             painter_instance = None
             painter_pending_bytes = image_bytes
-            painter_done_notified = False
             print(f"✓ PC: painter mode — new target image {kb} KB, previous painter reset")
             return
 
@@ -446,7 +444,7 @@ async def main():
             return p, rp
 
         async def runner():
-            nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy, painter_done_notified
+            nonlocal painter_instance, ray_painter, painter_pending_bytes, painter_busy
             try:
                 p, rp = await loop.run_in_executor(processing_executor, init_painter, image_bytes)
                 if p is None:
@@ -454,7 +452,6 @@ async def main():
                     return
                 painter_instance = p
                 ray_painter = rp
-                painter_done_notified = False
                 print(f"✓ PC: painter ready — {p.particles:,} particles, {p.n_strokes} strokes")
             except Exception as exc:
                 print(f"✗ PC: painter init error — {exc}")
@@ -485,7 +482,7 @@ async def main():
     async def on_settings(params):
         nonlocal ray_shape, sim_go_back_on, sim_constraints_mode, sim_gradient_mode, sim_world_mode, overlay_on, fov_target
         nonlocal img_a_hires, brand_on
-        nonlocal ai_mode, painter_instance, ray_painter, painter_pending_bytes, painter_done_notified
+        nonlocal ai_mode, painter_instance, ray_painter, painter_pending_bytes
 
         if 'mode' in params:
             new_mode = int(params['mode'])
@@ -495,7 +492,6 @@ async def main():
                     painter_instance = None
                     ray_painter = None
                     painter_pending_bytes = None
-                    painter_done_notified = False
                 print(f"✓ PC: ai_mode set to {ai_mode}")
 
         if 'shape' in params:
@@ -739,34 +735,8 @@ async def main():
         # ── painter mode ──
         if ai_mode == 4:
             await kick_painter_init()
-            if painter_instance is not None:
-                if not painter_instance.done:
-                    await loop.run_in_executor(painter_executor, painter_instance.update)
-                elif not painter_done_notified:
-                    painter_done_notified = True
-                    out_final = overlay_fixed(frame, logo_overlay, logo_x0, logo_y0)
-                    final_bytes = get_image_bytes(out_final, image_size=512)
-                    kb = len(final_bytes) // 1024
-                    print(f"✓ PC: painter done — uploading final image {kb} KB to phone via HTTP")
-                    qs = urllib.parse.urlencode({
-                        "session_id": session.session_id,
-                        "nickname": "NonCarbon Artist",
-                        "text": "Your painting is ready to share!",
-                    })
-                    upload_url = f"{config.PHONE_BACKEND_URL}/api/image_upload?{qs}"
-                    def _upload_painting(data=final_bytes, url=upload_url):
-                        req = urllib.request.Request(
-                            url, data=data, method="POST",
-                            headers={"Content-Type": "image/jpeg", "Content-Length": str(len(data))},
-                        )
-                        with urllib.request.urlopen(req, timeout=60) as resp:
-                            return resp.read()
-                    try:
-                        result = await loop.run_in_executor(None, _upload_painting)
-                        print(f"✓ PC: painter done — image uploaded to phone ({kb} KB)")
-                    except Exception as exc:
-                        print(f"✗ PC: painter done — HTTP upload failed: {exc}")
-                    painter_instance = None  # keep last frame; wait for new image
+            if painter_instance is not None and not painter_instance.done:
+                await loop.run_in_executor(painter_executor, painter_instance.update)
             if painter_instance is not None and ray_painter is not None:
                 frame = ray_painter.sphere(painter_instance.xyz, painter_instance.rgb, 3.0 * painter_instance.r)
             # else: keep last frame

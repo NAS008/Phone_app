@@ -4,15 +4,17 @@ import cv2
 from sklearn.cluster import MiniBatchKMeans
 wp.init()
 
-# Genome layout: [c, bw, x0, y0, x1, y1, a1, d1, a2, d2]
-# (x0,y0)→(x1,y1) set the origin and initial direction.
-# a1/d1 encode the second knot: angle offset (±MAX_TURN_RAD from dir 0→1)
-# and distance scale (×len01, range 0.3–2.0).  a2/d2 do the same for the third knot
-# relative to dir 1→2.  Capping the angles prevents aggressive U-turns.
-N_GENES      = 10
-GENE_MAX     = 255
-MAX_TURN_RAD = 1.0472   # 60° – hard cap on per-knot turning angle
-_CHECK_EVERY = 1   # sort + track best every N GA generations (fewer CPU↔GPU syncs)
+# Genome layout: [c, bw, x0, y0, a1, a2, a3, d]
+# (x0,y0) sets the stroke origin.  a1 is the absolute starting angle in
+# [-MAX_TURN_RAD, MAX_TURN_RAD]; a2 and a3 are chained turn offsets (same range).
+# d is a shared step length for all three segments, capped at MAX_LENGTH_FRAC
+# of the longer image dimension.  All three angles and d are each quantised to
+# 8 discrete levels to shrink the search space and speed GA convergence.
+N_GENES         = 8
+GENE_MAX        = 255
+MAX_TURN_RAD    = 0.7   # ±40° – hard cap on per-knot turning angle
+MAX_LENGTH_FRAC = 0.25  # d ≤ 25 % of the longer working dimension
+_CHECK_EVERY    = 1     # sort + track best every N GA generations
 
 # ── GA kernels ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,7 @@ def kernel_eval_chain_residual(
     img_h    : int,
     img_w    : int,
     max_hw   : int,
+    max_len  : float,
     alpha    : float,
 ):
     """Evaluate a chained triplet of strokes; fitness = -(sum of error deltas on base canvas)."""
@@ -57,30 +60,23 @@ def kernel_eval_chain_residual(
     bw   = int(genomes[ind, 1])
     x0   = float(int(genomes[ind, 2])) / 255.0 * float(img_w - 1)
     y0   = float(int(genomes[ind, 3])) / 255.0 * float(img_h - 1)
-    x1   = float(int(genomes[ind, 4])) / 255.0 * float(img_w - 1)
-    y1   = float(int(genomes[ind, 5])) / 255.0 * float(img_h - 1)
     hw   = float(1) + float(bw) / 255.0 * float(max_hw - 1)
 
-    # Derive x2,y2 and x3,y3 from angle-offset + distance genes (±60° cap).
-    dx01  = x1 - x0; dy01 = y1 - y0
-    len01 = wp.sqrt(dx01*dx01 + dy01*dy01)
-    x2 = x1; y2 = y1; x3 = x1; y3 = y1      # degenerate defaults
-    ux12 = float(1.0); uy12 = float(0.0)      # keep compiler happy
-    if len01 >= float(0.5):
-        inv01 = float(1.0) / len01
-        ux01  = dx01 * inv01; uy01 = dy01 * inv01
-        a1    = (float(int(genomes[ind, 6])) / float(255.0) * float(2.0) - float(1.0)) * float(1.0472)
-        d1    = (float(0.3) + float(int(genomes[ind, 7])) / float(255.0) * float(1.7)) * len01
-        c1    = wp.cos(a1); s1 = wp.sin(a1)
-        ux12  = ux01*c1 - uy01*s1; uy12 = ux01*s1 + uy01*c1
-        x2    = wp.clamp(x1 + ux12*d1, float(0.0), float(img_w - 1))
-        y2    = wp.clamp(y1 + uy12*d1, float(0.0), float(img_h - 1))
-        a2    = (float(int(genomes[ind, 8])) / float(255.0) * float(2.0) - float(1.0)) * float(1.0472)
-        d2    = (float(0.3) + float(int(genomes[ind, 9])) / float(255.0) * float(1.7)) * len01
-        c2    = wp.cos(a2); s2 = wp.sin(a2)
-        ux23  = ux12*c2 - uy12*s2; uy23 = ux12*s2 + uy12*c2
-        x3    = wp.clamp(x2 + ux23*d2, float(0.0), float(img_w - 1))
-        y3    = wp.clamp(y2 + uy23*d2, float(0.0), float(img_h - 1))
+    # Decode 3 chained angles + shared step (each quantised to 8 discrete levels).
+    a1_buck = (int(genomes[ind, 4]) * 8) // 256
+    a2_buck = (int(genomes[ind, 5]) * 8) // 256
+    a3_buck = (int(genomes[ind, 6]) * 8) // 256
+    d_buck  = (int(genomes[ind, 7]) * 8) // 256
+    dir1 = (float(a1_buck) / float(7) * float(2) - float(1)) * float(MAX_TURN_RAD)
+    dir2 = dir1 + (float(a2_buck) / float(7) * float(2) - float(1)) * float(MAX_TURN_RAD)
+    dir3 = dir2 + (float(a3_buck) / float(7) * float(2) - float(1)) * float(MAX_TURN_RAD)
+    d    = float(d_buck + 1) / float(8) * max_len
+    x1 = wp.clamp(x0 + wp.cos(dir1) * d, float(0.0), float(img_w - 1))
+    y1 = wp.clamp(y0 + wp.sin(dir1) * d, float(0.0), float(img_h - 1))
+    x2 = wp.clamp(x1 + wp.cos(dir2) * d, float(0.0), float(img_w - 1))
+    y2 = wp.clamp(y1 + wp.sin(dir2) * d, float(0.0), float(img_h - 1))
+    x3 = wp.clamp(x2 + wp.cos(dir3) * d, float(0.0), float(img_w - 1))
+    y3 = wp.clamp(y2 + wp.sin(dir3) * d, float(0.0), float(img_h - 1))
 
     cr = palette[c, 0]; cg = palette[c, 1]; cb = palette[c, 2]
 
@@ -476,7 +472,6 @@ def _seed_population(
     H           : int,
     W           : int,
     seed_frac   : float,
-    explore_r   : float,
     rng         : np.random.Generator,
 ) -> np.ndarray:
     """Vectorised population seeding for 3-stroke chain genomes."""
@@ -489,36 +484,23 @@ def _seed_population(
     py_s = flat_idx // W
     px_s = flat_idx % W
 
-    # Vectorised nearest-palette colour for each stroke origin
     def _best_color(ys, xs):
         colors = img_rgb[ys, xs].astype(np.float32) / 255.0   # (n, 3)
         diffs  = palette_np[None] - colors[:, None]            # (n, K, 3)
         return np.argmin((diffs**2).sum(-1), axis=-1).astype(np.int32)
 
-    def _endpoint(cx, cy, ex_frac, ey_frac):
-        dx = rng.uniform(-W * ex_frac, W * ex_frac, size=n_seed).astype(int)
-        dy = rng.uniform(-H * ey_frac, H * ey_frac, size=n_seed).astype(int)
-        ex = np.clip(cx + dx, 0, W - 1)
-        ey = np.clip(cy + dy, 0, H - 1)
-        return ex, ey
-
-    # Single color chosen at chain origin; one brush width for the whole chain
-    c        = _best_color(py_s, px_s)
-    bw       = rng.integers(0, 256, size=n_seed, dtype=np.int32)
-    x1s, y1s = _endpoint(px_s, py_s, explore_r, explore_r)
-    # Genes 6-9 are angle-offset and distance-scale for knots 2 and 3.
-    # Random in [0,255] → uniform exploration of the ±60° cone; GA refines from here.
+    c   = _best_color(py_s, px_s)
+    bw  = rng.integers(0, 256, size=n_seed, dtype=np.int32)
     a1s = rng.integers(0, 256, size=n_seed, dtype=np.int32)
-    d1s = rng.integers(0, 256, size=n_seed, dtype=np.int32)
     a2s = rng.integers(0, 256, size=n_seed, dtype=np.int32)
-    d2s = rng.integers(0, 256, size=n_seed, dtype=np.int32)
+    a3s = rng.integers(0, 256, size=n_seed, dtype=np.int32)
+    ds  = rng.integers(0, 256, size=n_seed, dtype=np.int32)
 
     def _enc(xs, dim): return np.clip((xs / max(dim - 1, 1) * 255), 0, 255).astype(np.int32)
 
     genomes = np.empty((P, N_GENES), dtype=np.int32)
     genomes[:n_seed] = np.stack([
-        c, bw, _enc(px_s, W), _enc(py_s, H), _enc(x1s, W), _enc(y1s, H),
-        a1s, d1s, a2s, d2s,
+        c, bw, _enc(px_s, W), _enc(py_s, H), a1s, a2s, a3s, ds,
     ], axis=1)
     genomes[n_seed:] = rng.integers(0, 256, size=(P - n_seed, N_GENES), dtype=np.int32)
     return genomes
@@ -891,8 +873,16 @@ class Painter:
         tex_h = max(1, int(round(hw * 2.0)))
         tex   = cv2.resize(self.brush_base, (tex_w, tex_h),
                            interpolation=cv2.INTER_LINEAR)
-        tex_a = wp.array(np.clip(tex, 0.0, 1.0).astype(np.float32),
-                         dtype=wp.float32, shape=(tex_h, tex_w),
+        tex   = np.clip(tex, 0.0, 1.0).astype(np.float32)
+        # Fade the texture to zero at both tips so pixels clamped to the
+        # endpoints (including those beyond p3) receive zero alpha and leave
+        # no trailing artifact.
+        tip = max(1, min(8, tex_w // 8))
+        if tex_w > tip * 2:
+            fade = np.linspace(0.0, 1.0, tip, dtype=np.float32)
+            tex[:,     :tip] *= fade[np.newaxis, :]
+            tex[:, -tip:   ] *= fade[::-1][np.newaxis, :]
+        tex_a = wp.array(tex, dtype=wp.float32, shape=(tex_h, tex_w),
                          device=self.device)
 
         n_pts      = len(samples)
@@ -928,19 +918,20 @@ class Painter:
         genome_np   = _seed_population(
             residual_np, self.palette_np, self.img_rgb,
             self.P, self.H, self.W,
-            self.seed_frac, self.explore_r, self.rng,
+            self.seed_frac, self.rng,
         )
         self.genome_a = wp.array(genome_np, dtype=wp.int32,
                                  shape=(self.P, N_GENES), device=self.device)
 
         best_f     = -1e18
         best_genes = genome_np[0].copy()
+        max_len    = float(max(self.H, self.W)) * MAX_LENGTH_FRAC
 
         for gen in range(self.gens_per_stroke):
             wp.launch(kernel_eval_chain_residual, dim=self.P,
                       inputs=[self.genome_a, self.palette_a, self.canvas_lo_a,
                               self.target_a, self.residual_a, self.fitness_a,
-                              self.H, self.W, eff_max_hw, self.alpha],
+                              self.H, self.W, eff_max_hw, max_len, self.alpha],
                       device=self.device)
 
             # Sync every _CHECK_EVERY gens (or on the last gen) to sort + track best
@@ -968,28 +959,22 @@ class Painter:
         bw  = int(g[1])
         x0  = float(g[2]) / 255.0 * (self.W - 1)
         y0  = float(g[3]) / 255.0 * (self.H - 1)
-        x1  = float(g[4]) / 255.0 * (self.W - 1)
-        y1  = float(g[5]) / 255.0 * (self.H - 1)
         hw  = 1.0 + float(bw) / 255.0 * (eff_max_hw - 1)
 
-        dx01 = x1 - x0; dy01 = y1 - y0
-        len01 = float(np.hypot(dx01, dy01))
-        if len01 >= 0.5:
-            ux01 = dx01 / len01; uy01 = dy01 / len01
-            a1   = (float(g[6]) / 255.0 * 2.0 - 1.0) * MAX_TURN_RAD
-            d1   = (0.3 + float(g[7]) / 255.0 * 1.7) * len01
-            c1   = float(np.cos(a1)); s1 = float(np.sin(a1))
-            ux12 = ux01*c1 - uy01*s1; uy12 = ux01*s1 + uy01*c1
-            x2   = float(np.clip(x1 + ux12*d1, 0, self.W - 1))
-            y2   = float(np.clip(y1 + uy12*d1, 0, self.H - 1))
-            a2   = (float(g[8]) / 255.0 * 2.0 - 1.0) * MAX_TURN_RAD
-            d2   = (0.3 + float(g[9]) / 255.0 * 1.7) * len01
-            c2   = float(np.cos(a2)); s2 = float(np.sin(a2))
-            ux23 = ux12*c2 - uy12*s2; uy23 = ux12*s2 + uy12*c2
-            x3   = float(np.clip(x2 + ux23*d2, 0, self.W - 1))
-            y3   = float(np.clip(y2 + uy23*d2, 0, self.H - 1))
-        else:
-            x2 = x1; y2 = y1; x3 = x1; y3 = y1
+        a1_buck = int(g[4]) * 8 // 256
+        a2_buck = int(g[5]) * 8 // 256
+        a3_buck = int(g[6]) * 8 // 256
+        d_buck  = int(g[7]) * 8 // 256
+        dir1 = (float(a1_buck) / 7.0 * 2.0 - 1.0) * MAX_TURN_RAD
+        dir2 = dir1 + (float(a2_buck) / 7.0 * 2.0 - 1.0) * MAX_TURN_RAD
+        dir3 = dir2 + (float(a3_buck) / 7.0 * 2.0 - 1.0) * MAX_TURN_RAD
+        d    = float(d_buck + 1) / 8.0 * max_len
+        x1   = float(np.clip(x0 + np.cos(dir1) * d, 0, self.W - 1))
+        y1   = float(np.clip(y0 + np.sin(dir1) * d, 0, self.H - 1))
+        x2   = float(np.clip(x1 + np.cos(dir2) * d, 0, self.W - 1))
+        y2   = float(np.clip(y1 + np.sin(dir2) * d, 0, self.H - 1))
+        x3   = float(np.clip(x2 + np.cos(dir3) * d, 0, self.W - 1))
+        y3   = float(np.clip(y2 + np.sin(dir3) * d, 0, self.H - 1))
 
         # ── Render as a single Catmull-Rom spline through all 4 control points ─
         cr  = float(self.palette_np[cid, 0])

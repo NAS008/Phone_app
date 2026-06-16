@@ -62,6 +62,16 @@ def resize_image_bytes_jpeg(image_bytes, size, quality=85):
     img_bgr = cv2.resize(img_bgr, (size, size), interpolation=cv2.INTER_AREA)
     return bgr_to_jpeg(img_bgr, quality)
 
+def crop_center_resize(img_bgr, target_w, target_h):
+    h, w = img_bgr.shape[:2]
+    scale = max(target_w / w, target_h / h)
+    sw, sh = int(round(w * scale)), int(round(h * scale))
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    img_bgr = cv2.resize(img_bgr, (sw, sh), interpolation=interp)
+    cy = (sh - target_h) // 2
+    cx = (sw - target_w) // 2
+    return img_bgr[cy:cy + target_h, cx:cx + target_w]
+
 async def main():
     config = Config()
     loop = asyncio.get_running_loop()
@@ -250,7 +260,7 @@ async def main():
             if image_part:
                 anchor_bgr = jpeg_to_bgr(image_part["data"])
                 if anchor_bgr is not None:
-                    anchor_bgr = cv2.resize(anchor_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+                    anchor_bgr = crop_center_resize(anchor_bgr, config.IMAGE_W, config.IMAGE_H)
                 else:
                     anchor_bgr = last_generated_image_bgr
             else:
@@ -337,7 +347,7 @@ async def main():
                 await _publish_error(effective_session_id, "SD image generation failed. Please try again.", turn_id)
                 return
 
-            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
             kb = len(bgr_to_jpeg(new_bgr)) // 1024
             print(f"✓ Server: SD generated {kb} KB — {prompt_text}")
 
@@ -405,7 +415,7 @@ async def main():
             new_bgr = jpeg_to_bgr(image_part["data"])
             if new_bgr is None:
                 return
-            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
             last_generated_image_bgr = new_bgr
             image_bytes = bgr_to_jpeg(new_bgr)
             print(f"✓ Server: painter mode — Gemini image {len(image_bytes) // 1024} KB — {result.get('prompt', '')}")
@@ -476,7 +486,7 @@ async def main():
             if new_bgr is None:
                 await _publish_error(effective_session_id, "Failed to decode generated image.", turn_id)
                 return
-            new_bgr = cv2.resize(new_bgr, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
             prompt_used = result.get("prompt", "")
             kb = len(image_part["data"]) // 1024
             print(f"✓ Server: Gemini image {kb} KB — {prompt_used}")

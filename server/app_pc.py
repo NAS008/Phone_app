@@ -69,6 +69,16 @@ def get_image_bytes_from_parts(parts):
         return None
     return part.get("data")
 
+def crop_center_resize(img_bgr, target_w, target_h):
+    h, w = img_bgr.shape[:2]
+    scale = max(target_w / w, target_h / h)
+    sw, sh = int(round(w * scale)), int(round(h * scale))
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    img_bgr = cv2.resize(img_bgr, (sw, sh), interpolation=interp)
+    cy = (sh - target_h) // 2
+    cx = (sw - target_w) // 2
+    return img_bgr[cy:cy + target_h, cx:cx + target_w]
+
 def get_image_bytes(image_bgr, image_size=0, quality=85):
     if image_size > 0:
         h, w = image_bgr.shape[:2]
@@ -195,7 +205,7 @@ async def main():
     sim_gradient_mode = 0
     sim_world_mode = 0
     img_a = cv2.imread(r"..\..\input\19.png")
-    img_a = cv2.resize(img_a, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+    img_a = crop_center_resize(img_a, config.IMAGE_W, config.IMAGE_H)
     img_a_hires = super.upscale(img_a)
     sim.new_image(img_a_hires)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
@@ -338,7 +348,7 @@ async def main():
         if img_b is None:
             return {"ok": False, "error": "✗ PC: failed to decode received image"}
 
-        img_b = cv2.resize(img_b, (config.IMAGE_W, config.IMAGE_H), interpolation=cv2.INTER_AREA)
+        img_b = crop_center_resize(img_b, config.IMAGE_W, config.IMAGE_H)
         img_b_hires = super.upscale(img_b)
         interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
         generated_frames = [interp for interp in (interpolated or []) if interp is not None]
@@ -411,7 +421,7 @@ async def main():
                 canvas_w        = config.WINDOW_W,
                 canvas_h        = config.WINDOW_H,
                 population      = 1024,
-                n_strokes       = 500,
+                n_strokes       = config.MAX_STROKES,
                 gens_per_stroke = 60,
                 elite_n         = 20,
                 mutation_rate   = 0.05,
@@ -420,8 +430,8 @@ async def main():
                 stroke_alpha    = 0.95,
                 seed_frac       = 0.6,
                 explore_r       = 0.20,
-                max_dim         = 386,
-                impasto_dz_frac = 0.3,
+                max_dim         = config.MAX_DIM,
+                impasto_dz_frac = config.IMPASTO_Z,
                 device          = "cuda",
             )
             p.init_image(img_bgr)

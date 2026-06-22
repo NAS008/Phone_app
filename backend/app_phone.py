@@ -24,16 +24,13 @@ import urllib.parse
 import sys as _sys, os as _os
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from PIL import Image
 from google import genai
 from google.genai import types
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
 from turn import CloudflareTurn
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
-from file import File
-
-_file = File(Config.IMAGE_W, Config.IMAGE_H)
 
 def _now_ms():
     return int(time.time() * 1000)
@@ -52,6 +49,18 @@ def _coerce_bytes(value):
     raise TypeError(f"Unsupported binary type: {type(value).__name__}")
 
 
+def _crop_image(data: bytes, iw: int, ih: int) -> bytes:
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    w, h = img.size
+    scale = max(iw / w, ih / h)
+    nw, nh = int(w * scale), int(h * scale)
+    img = img.resize((nw, nh), Image.LANCZOS)
+    x0, y0 = (nw - iw) // 2, (nh - ih) // 2
+    img = img.crop((x0, y0, x0 + iw, y0 + ih))
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
+
 def _normalize_http_part(part):
     kind = part.get("kind")
 
@@ -60,7 +69,7 @@ def _normalize_http_part(part):
 
     if kind == "image":
         raw = _coerce_bytes(part.get("data"))
-        processed = _file.pil_to_bytes(_file.bytes_to_pil(raw, fit=True))
+        processed = _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H)
         return {
             "kind": "image",
             "mime_type": "image/jpeg",
@@ -83,7 +92,7 @@ def _normalize_http_payload_to_bus_message(payload):
                 "kind": "image",
                 "mime_type": "image/jpeg",
                 "purpose": payload.get("image_purpose", "input"),
-                "data": _file.pil_to_bytes(_file.bytes_to_pil(raw, fit=True)),
+                "data": _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H),
             })
     else:
         parts = [_normalize_http_part(part) for part in parts]

@@ -1,4 +1,5 @@
 import { encode } from "@msgpack/msgpack";
+import fileService from "./fileService";
 
 class MessageBusService {
   constructor() {
@@ -21,20 +22,6 @@ class MessageBusService {
     return response.json();
   }
 
-  async blobToBytes(blob) {
-    if (!blob) return null;
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
-  async dataUrlToBytes(dataUrl) {
-    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) {
-      return null;
-    }
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
   // ── Bus publish methods ────────────────────────────────────────────────────
 
   /**
@@ -52,8 +39,8 @@ class MessageBusService {
    * Publish USER_MESSAGE — text prompt and/or image/audio attachment.
    */
   async sendUserMessage({ text = null, audioBlob = null, imageData = null, sessionId, nickname }) {
-    const audio_bytes = await this.blobToBytes(audioBlob);
-    const image_bytes = await this.dataUrlToBytes(imageData);
+    const audio_bytes = await fileService.blobToBytes(audioBlob);
+    const image_bytes = await fileService.dataUrlToBytes(imageData);
     return this.postMsgpack("/api/publish/user_message", {
       session_id: String(sessionId),
       nickname: String(nickname),
@@ -207,7 +194,7 @@ class MessageBusService {
    */
   async sendAudioForTranscription(audioBlob, sessionId, nickname = null) {
     if (!audioBlob) return null;
-    const audio_bytes = await this.blobToBytes(audioBlob);
+    const audio_bytes = await fileService.blobToBytes(audioBlob);
     return this.postMsgpack("/api/publish/audio", {
       session_id: String(sessionId || ""),
       nickname: String(nickname || ""),

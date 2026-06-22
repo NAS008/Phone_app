@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./ArtistMode.css";
 import MessageBusService from "../../services/messageBusService";
+import fileService from "../../services/fileService";
 import { StreamView } from "../../components";
 import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
 const buildId = (prefix) =>
@@ -39,47 +40,6 @@ const shouldPreferNativeShare = () => {
   return isIOS || isAndroid;
 };
 
-const fileToDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
-
-const loadImage = (src) =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Failed to load image"));
-    image.src = src;
-  });
-
-const prepareImageData = async (file) => {
-  const rawDataUrl = await fileToDataUrl(file);
-  const image = await loadImage(rawDataUrl);
-  const maxSide = 1400;
-  let width = image.width;
-  let height = image.height;
-
-  if (Math.max(width, height) > maxSide) {
-    const ratio = maxSide / Math.max(width, height);
-    width = Math.round(width * ratio);
-    height = Math.round(height * ratio);
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    throw new Error("Canvas is not available");
-  }
-
-  context.drawImage(image, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", 0.86);
-};
 
 const formatSeconds = (value) => {
   const minutes = Math.floor(value / 60)
@@ -843,7 +803,7 @@ const appendFeed = useCallback((message) => {
       if (!file) return;
 
       try {
-        const dataUrl = await prepareImageData(file);
+        const dataUrl = await fileService.prepareImageData(file);
         setDraftImage(dataUrl);
         setDraftLabel(`${sourceLabel}: ${file.name || "image"}`);
         setIsAttachmentMenuOpen(false);

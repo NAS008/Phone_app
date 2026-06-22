@@ -30,7 +30,7 @@ from google.genai import types
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
-from turn import CloudflareTurn
+from stream import CloudflareTurn
 
 def _now_ms():
     return int(time.time() * 1000)

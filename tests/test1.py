@@ -15,7 +15,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from sd35 import Folder
+from file import File
 
 def resize_to_fit_window(img, window_w, window_h):
     target_w = window_w
@@ -50,12 +50,13 @@ async def main():
         smooth=15,
         dt = 1.0 / config.FPS,
     )
-    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
+    folder = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img, depth_factor=0.0)
-    sim_gradient_on = False
+    sim_constraints_mode = 0
+    sim_gradient_mode = 0
+    sim_world_mode = 0
     sim_goback_on = False
-    sim_constraints_on = False
 
     # Ray tracer setup
     ray = RayTracer(
@@ -86,12 +87,15 @@ async def main():
     while True:
 
         # Simulate
-        if sim_gradient_on:
-            sim.inject_gradient()
-
         if ms.on:
             sim.inject_mouse(ms.pos, ms.vel)
-        sim.update(constraints_on=sim_constraints_on, go_back_on=sim_goback_on)
+        
+        sim.update_flip(
+            go_back_on=sim_goback_on,
+            constraints_mode=sim_constraints_mode,
+            gradient_mode=sim_gradient_mode,
+            world_mode = sim_world_mode, world_center=config.world_center, world_radius=config.world_radius
+        )
 
         # Keep FPS cadence on raytracing to save CPU, since it's the bottleneck
         now = time.perf_counter()
@@ -124,9 +128,17 @@ async def main():
         elif key == ord('b'):
             sim_goback_on = not sim_goback_on
         elif key == ord('c'):
-            sim_constraints_on = not sim_constraints_on
+            sim_constraints_mode += 1
+            if sim_constraints_mode >= 3:
+                sim_constraints_mode = 0
         elif key == ord('g'):
-            sim_gradient_on = not sim_gradient_on
+            sim_gradient_mode += 1
+            if sim_gradient_mode >= 3:
+                sim_gradient_mode = 0
+        elif key == ord('w'):
+            sim_world_mode += 1
+            if sim_world_mode >= 3:
+                sim_world_mode = 0
         elif key == ord('n'):
             img = folder.load_image()
             sim.new_image(img, depth_factor=0.0)

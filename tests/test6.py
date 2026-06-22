@@ -11,24 +11,22 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from config import Config
 
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
-from ai import Folder
+from file import File
 from painter import Painter
 from ray import RayTracer
 
 async def main():
     config = Config()
-    # folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
+    # folder = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     # image  = folder.load_image()
-    image = cv2.imread(r"..\..\output\noncarbon-artwork-1780049753086.png")
+    image = cv2.imread(r"..\..\output\snapshot_20260512_202432.png")
     BRUSH_PATH = r"..\..\brand\brush03.png"
-
-    MAX_DIM = 386   # painter working resolution (GA runs at this size)
 
     painter = Painter(
         canvas_w        = config.WINDOW_W,
         canvas_h        = config.WINDOW_H,
         population      = 1024,
-        n_strokes       = 500,
+        n_strokes       = config.MAX_STROKES,
         gens_per_stroke = 60,
         elite_n         = 20,
         mutation_rate   = 0.05,
@@ -37,8 +35,8 @@ async def main():
         stroke_alpha    = 0.95,
         seed_frac       = 0.6,
         explore_r       = 0.20,
-        max_dim         = MAX_DIM,
-        impasto_dz_frac = 0.3,
+        max_dim         = config.MAX_DIM,
+        impasto_dz_frac = config.IMPASTO_Z,
         device          = "cuda",
         seed            = 42,
     )
@@ -66,6 +64,7 @@ async def main():
         shadow      = config.shadow,
         n_particles = painter.particles,   # pre-allocate grid particle_ids
     )
+    ray_shape = 0
 
     cv2.namedWindow(config.APP_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(config.APP_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -88,12 +87,21 @@ async def main():
                 )
 
         # Raytrace current particle state and display
-        frame = ray.sphere(painter.xyz, painter.rgb, 3.0 * painter.r)
+        if ray_shape == 0:
+            frame = ray.sphere(painter.xyz, painter.rgb, 3.0 * painter.r)
+        elif ray_shape == 1:
+            frame = ray.pixel(painter.xyz, painter.rgb, 1.3 * painter.r)
+        else:
+            frame = ray.triangle(painter.xyz, painter.rgb, painter.n_x, painter.n_y)
         cv2.imshow(config.APP_NAME, frame)
 
         key = cv2.waitKeyEx(1)
         if key in (ord('q'), 27):
             break
+        elif key == ord('r'):
+            ray_shape += 1
+            if ray_shape >= 3:
+                ray_shape = 0
 
         await asyncio.sleep(0)
 

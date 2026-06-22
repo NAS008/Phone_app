@@ -12,7 +12,8 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from sd35 import Folder, SuperResolution
+from ai import SuperResolution
+from file import File
 ctypes.windll.user32.SetProcessDPIAware()
 
 def resize_to_fit_window(img, window_w, window_h):
@@ -47,7 +48,7 @@ async def main():
         G=config.G, L=4,
         smooth=15,
     )
-    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
+    folder = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img)
 
@@ -82,11 +83,11 @@ async def main():
     next_tick = time.perf_counter()
     while True:
 
-        sim.inject_gradient()
+        sim._inject_gradient()
 
         if ms.on:
             sim.inject_mouse(ms.pos, ms.vel)
-        sim.update(constraints_on=True, go_back_on=True)
+        sim.update_flip(constraints_mode=1, go_back_on=True)
 
         now = time.perf_counter()
         if now < next_tick:

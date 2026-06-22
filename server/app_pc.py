@@ -45,7 +45,7 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
-from turn import CloudflareTurn
+from stream import FrameBus, StreamingServer, build_ice_servers, CloudflareTurn
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
 from session import Session
 from ray import RayTracer
@@ -54,7 +54,6 @@ from sim import Simulator
 from painter import Painter
 from ui import Camera, Mic, Mouse
 from director import Director
-from stream import FrameBus, StreamingServer, build_ice_servers
 from brand import Brand
 from file import File
 

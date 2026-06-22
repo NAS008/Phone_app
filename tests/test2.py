@@ -20,7 +20,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from sd35 import Folder
+from file import File
 from stream import FrameBus, StreamingServer
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -59,7 +59,7 @@ async def main():
         smooth=3,
         dt = 1.0 / config.FPS_SIM,
     )
-    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
+    folder = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img)
     sim_gradient_on = False

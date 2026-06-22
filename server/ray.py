@@ -1958,17 +1958,19 @@ def shadow_triangle(
             pid = particle_ids[start_idx + i]
             
             # SHAPE LINE 1
-            bh = next_x[pid]  
+            bh = next_x[pid]
             bv = next_y[pid]
             if bh < 0 or bv < 0:
                 continue
             bd = next_y[bh]
-            
+            if bd < 0:
+                continue
+
             p0 = xyz[pid]
             p1 = xyz[bh]
             p2 = xyz[bd]
             p3 = xyz[bv]
-            
+
             t0 = intersect_triangle(ray_origin, ray_dir, p0, p1, p2)                      
             t1 = intersect_triangle(ray_origin, ray_dir, p0, p2, p3) 
            

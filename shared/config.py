@@ -10,11 +10,11 @@ class Config:
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
     MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 2048, 1152#2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 2048, 2048#1024, 1024#1152, 2048#512, 512#1080, 1080#2160, 2160
     IMAGE_W = (WINDOW_W // 4) // 16 * 16
     IMAGE_H = (WINDOW_H // 4) // 16 * 16
     GRID_SIZE = 128
-    PIXELS_PER_CELL = 8#max(IMAGE_W, IMAGE_H) // GRID_SIZE
+    PIXELS_PER_CELL = max(IMAGE_W, IMAGE_H) // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
     if aspect >= 1.0:
         GX = GRID_SIZE
@@ -24,7 +24,7 @@ class Config:
         GY = GRID_SIZE
     GZ = GRID_SIZE // 4
     G = [GX, GY, GZ]
-    LAYERS = 1
+    LAYERS = 3
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
     light = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.6]    
@@ -33,7 +33,7 @@ class Config:
     background = [0.0, 0.0, 0.0]
     ambient = 0.6
     shadow = 0.3
-    FPS = 12
+    FPS = 10
     FPS_SIM = FPS * 2
     SIM_SPEED = 0.1  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
     MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
@@ -58,6 +58,11 @@ class Config:
     redis_port     = 6380
     redis_password = __import__('os').environ.get('REDIS_PASSWORD', '')
     redis_ssl      = True
+
+    # Painter
+    MAX_DIM = 512
+    MAX_STROKES = 1000
+    IMPASTO_Z = 0.4
 
     # Streaming
     stream_on = True
@@ -106,7 +111,20 @@ class Config:
     GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
 
     # Optical flow
-    OF_FRAMES = 10
+    OF_FRAMES = 5
+
+    # FramePack (image-to-video next-frame prediction via HunyuanVideo backbone)
+    # Download: huggingface-cli download lllyasviel/FramePack_F1_I2V_HY_20250503
+    #           huggingface-cli download hunyuanvideo-community/HunyuanVideo
+    FP_TRANSFORMER_PATH = r"C:\Users\NAS\Models\FramePack_F1_I2V_HY_20250503"
+    FP_BASE_PATH        = r"C:\Users\NAS\Models\HunyuanVideo"
+    FP_LATENT_WINDOW    = 9        # bars per batch = ceil(NUM_FRAMES / LATENT_WINDOW); set equal for 1 bar
+    FP_NUM_FRAMES       = 9        # latent frames to generate; output pixel frames = 4×N+1 = 37
+    FP_SEED             = 42
+    FP_PROMPT           = "melting, dripping downward, viscous liquid flowing slowly, wax melting, paint dripping under gravity, forms elongating and falling"
+    FP_GUIDANCE_SCALE   = 9.0
+    FP_TRUE_CFG_SCALE   = 3.5
+    FP_INFERENCE_STEPS  = 6       # 5-8 is enough; resolution is the quality limit at small sizes
 
     STYLE = {
         "None": {

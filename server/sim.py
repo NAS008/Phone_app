@@ -892,6 +892,108 @@ def k_update_vel_from_positions(
     pid = wp.tid()
     vel[pid] = (xyz[pid] - xyz_prior[pid]) / dt
 
+# Line fit
+
+@wp.kernel
+def k_sum_xyz(
+    xyz: wp.array(dtype=wp.vec3),
+    out: wp.array(dtype=float),          # [count, sx, sy, sz]
+):
+    tid = wp.tid()
+    p = xyz[tid]
+    wp.atomic_add(out, 0, 1.0)
+    wp.atomic_add(out, 1, p.x)
+    wp.atomic_add(out, 2, p.y)
+    wp.atomic_add(out, 3, p.z)
+
+@wp.kernel
+def k_compute_angle(
+    xyz: wp.array(dtype=wp.vec3),
+    centroid: wp.vec3,
+    ax0: wp.vec3,                        # first  principal axis (unit)
+    ax1: wp.vec3,                        # second principal axis (unit)
+    angles: wp.array(dtype=float),       # output per-point angle in [0, 2π)
+):
+    tid = wp.tid()
+    d = xyz[tid] - centroid
+    u = wp.dot(d, ax0)
+    v = wp.dot(d, ax1)
+    a = wp.atan2(v, u)
+    if a < 0.0:
+        a = a + 6.2831853071795864
+    angles[tid] = a
+
+@wp.kernel
+def k_accumulate_fourier(
+    xyz: wp.array(dtype=wp.vec3),
+    angles: wp.array(dtype=float),
+    K: int,                              # number of harmonics
+    out: wp.array(dtype=float),          # length 3*(2*K+1)  row = [X coeffs | Y coeffs | Z coeffs]
+):
+    tid = wp.tid()
+    t = angles[tid]
+    p = xyz[tid]
+    n = float(xyz.shape[0])
+
+    # stride between axis blocks
+    stride = 2 * K + 1
+
+    # a0 term
+    wp.atomic_add(out, 0 * stride + 0, p.x / n)
+    wp.atomic_add(out, 1 * stride + 0, p.y / n)
+    wp.atomic_add(out, 2 * stride + 0, p.z / n)
+
+    for k in range(1, K + 1):
+        kf = float(k)
+        c = wp.cos(kf * t)
+        s = wp.sin(kf * t)
+        scale = 2.0 / n
+
+        # cos coefficients at positions 1..K
+        wp.atomic_add(out, 0 * stride + k,         p.x * c * scale)
+        wp.atomic_add(out, 1 * stride + k,         p.y * c * scale)
+        wp.atomic_add(out, 2 * stride + k,         p.z * c * scale)
+
+        # sin coefficients at positions K+1..2K
+        wp.atomic_add(out, 0 * stride + K + k,     p.x * s * scale)
+        wp.atomic_add(out, 1 * stride + K + k,     p.y * s * scale)
+        wp.atomic_add(out, 2 * stride + K + k,     p.z * s * scale)
+
+@wp.kernel
+def k_eval_fourier_curve(
+    coeffs: wp.array(dtype=float),       # 3*(2K+1)
+    K: int,
+    M: int,                              # number of output samples
+    line_xyz: wp.array(dtype=wp.vec3),
+):
+    tid = wp.tid()
+    t = 6.2831853071795864 * float(tid) / float(M)
+    stride = 2 * K + 1
+
+    x = coeffs[0 * stride + 0]
+    y = coeffs[1 * stride + 0]
+    z = coeffs[2 * stride + 0]
+
+    for k in range(1, K + 1):
+        kf = float(k)
+        c = wp.cos(kf * t)
+        s = wp.sin(kf * t)
+
+        x = x + coeffs[0 * stride + k] * c + coeffs[0 * stride + K + k] * s
+        y = y + coeffs[1 * stride + k] * c + coeffs[1 * stride + K + k] * s
+        z = z + coeffs[2 * stride + k] * c + coeffs[2 * stride + K + k] * s
+
+    line_xyz[tid] = wp.vec3(x, y, z)
+
+@wp.kernel
+def k_build_line_next_closed(
+    line_next: wp.array(dtype=int),
+):
+    """Closed loop: last point connects back to first."""
+    tid = wp.tid()
+    n = line_next.shape[0]
+    line_next[tid] = (tid + 1) % n
+
 class Simulator:
     def __init__(self,
         IMAGE_W=512, IMAGE_H=512, PIXELS_PER_CELL=4,
@@ -1150,7 +1252,78 @@ class Simulator:
             self.r, self.h, self.G
         ], device="cuda")
 
-    def update_fluid(self, go_back_on=True):
+    def fit_fourier_line(self,
+        xyz_wp: wp.array,
+        samples: int = 128,
+        harmonics: int = 8,
+        device: str = "cuda",
+    ):
+        n = len(xyz_wp)
+
+        # ── centroid ──────────────────────────────────────────────────────────
+        sum_buf = wp.zeros(4, dtype=float, device=device)
+        wp.launch(k_sum_xyz, dim=n, inputs=[xyz_wp, sum_buf], device=device)
+        wp.synchronize_device(device)
+
+        s = sum_buf.numpy()
+        count = max(float(s[0]), 1.0)
+        centroid_np = np.array([s[1], s[2], s[3]], dtype=np.float64) / count
+
+        # ── two ordering axes via covariance (CPU, tiny 3×3) ──────────────────
+        # Download xyz once — only for axis extraction, not per-frame bottleneck
+        xyz_np = xyz_wp.numpy().view(np.float32).reshape(-1, 3).astype(np.float64)
+        d = xyz_np - centroid_np
+        C = (d.T @ d) / count
+        evals, evecs = np.linalg.eigh(C)
+        order = np.argsort(evals)[::-1]     # descending eigenvalue order
+        ax0 = evecs[:, order[0]].astype(np.float32)
+        ax1 = evecs[:, order[1]].astype(np.float32)
+
+        centroid_wp = wp.vec3(*centroid_np.astype(np.float32).tolist())
+        ax0_wp = wp.vec3(*ax0.tolist())
+        ax1_wp = wp.vec3(*ax1.tolist())
+
+        # ── angle per point ───────────────────────────────────────────────────
+        angles = wp.empty(n, dtype=float, device=device)
+        wp.launch(
+            k_compute_angle,
+            dim=n,
+            inputs=[xyz_wp, centroid_wp, ax0_wp, ax1_wp, angles],
+            device=device,
+        )
+
+        # ── Fourier coefficients ──────────────────────────────────────────────
+        K = harmonics
+        coeff_len = 3 * (2 * K + 1)
+        coeffs = wp.zeros(coeff_len, dtype=float, device=device)
+        wp.launch(
+            k_accumulate_fourier,
+            dim=n,
+            inputs=[xyz_wp, angles, K, coeffs],
+            device=device,
+        )
+
+        # ── evaluate curve ────────────────────────────────────────────────────
+        line_xyz = wp.empty(samples, dtype=wp.vec3, device=device)
+        line_next = wp.empty(samples, dtype=int, device=device)
+
+        wp.launch(
+            k_eval_fourier_curve,
+            dim=samples,
+            inputs=[coeffs, K, samples, line_xyz],
+            device=device,
+        )
+        wp.launch(
+            k_build_line_next_closed,
+            dim=samples,
+            inputs=[line_next],
+            device=device,
+        )
+        wp.synchronize_device(device)
+
+        return line_xyz, line_next
+
+    def update_fluid(self, go_back_on=True, world_mode=0, world_center=[0.5, 0.5, 0.5], world_radius=[0.4, 0.4, 0.1]):
         # Grid   
         wp.launch(k_add_source, dim=self.G3, inputs=[self.u, self.u_prev, self.dt], device="cuda")
         wp.launch(k_add_source, dim=self.G3, inputs=[self.v, self.v_prev, self.dt], device="cuda")
@@ -1171,10 +1344,10 @@ class Simulator:
 
         if go_back_on:
             wp.launch(k_goal_force, dim=self.particles, inputs=[
-                self.xyz, self.xyz_goal, 0.1
+                self.xyz, self.xyz_goal, 0.05
             ], device="cuda")
 
-        self._apply_boundaries()
+        self._apply_boundaries(world_mode, world_center, world_radius)
 
         wp.launch(k_update_rotation, dim=self.particles, inputs=[
             self.xyz, self.xyz_prior, self.rot, 0.1 * self.r, 0.1

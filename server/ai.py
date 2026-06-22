@@ -1,9 +1,6 @@
-import os
 import json
 import re
 import cv2
-import glob
-import random
 import time
 import hashlib
 import numpy as np
@@ -211,8 +208,9 @@ class Gemini:
             if text_parts:
                 contents.append(types.Content(role=role, parts=text_parts))
 
-        # Current turn: generation prompt + reference image from the user's parts
-        current_parts: List[Any] = [types.Part(text=prompt)]
+        # Current turn: reference images first so Gemini weights them as the
+        # primary spatial/visual constraint before reading the text prompt.
+        current_parts: List[Any] = []
         for part in (parts or []):
             if part.get("kind") == "image":
                 data = part.get("data")
@@ -221,6 +219,7 @@ class Gemini:
                         data=data,
                         mime_type=part.get("mime_type", self.IMAGE_INPUT_MIME),
                     ))
+        current_parts.append(types.Part(text=prompt))
         contents.append(types.Content(role="user", parts=current_parts))
 
         response = self.client.models.generate_content(
@@ -382,72 +381,48 @@ class Gemini:
             raise ValueError(f"Gemini returned invalid theme list: {themes}")
         return [str(t) for t in themes[:10]]
 
-class Folder:
-    def __init__(self, image_w, image_h, input_folder):
-        self.image_w = image_w
-        self.image_h = image_h
-        self.paths = self._init_image_list(input_folder)
+    def generate_subjects(self, theme: str, count: int = 5) -> Dict[str, List[str]]:
+        """From a theme, invent paired subjects for the box installation.
 
-    def _init_image_list(self, folder, extensions=("*.png", "*.jpg", "*.jpeg")):
-        paths = []
-        for ext in extensions:
-            paths.extend(glob.glob(os.path.join(folder, ext)))
-        if not paths:
-            print("No images found in folder!")
-        paths.sort()
-        return paths
-
-    def _adjust_image(self, path, IW, IH):
-        img = cv2.imread(path)
-        h, w = img.shape[:2]
-
-        # Step 1: scale to fill IW x IH (cover, no black bars)
-        scale = max(IW / w, IH / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-
-        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_LANCZOS4
-        resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
-
-        # Step 2: crop center to exactly IW x IH
-        x_off = (new_w - IW) // 2
-        y_off = (new_h - IH) // 2
-        cropped = resized[y_off:y_off + IH, x_off:x_off + IW]
-
-        # Step 3: paste into clean canvas (guarantees exact output size)
-        canvas = np.zeros((IH, IW, img.shape[2]), dtype=img.dtype)
-        canvas[0:IH, 0:IW] = cropped
-        return canvas
-     
-    def load_image(self, id=None):
-        if id is None:
-            image_path = random.choice(self.paths)
-        else:
-            image_path = self.paths[id]
-        image = self._adjust_image(image_path, self.image_w, self.image_h)
-        return image
-    
-    def resize_to_fit_window(self, img, window_w, window_h):
-        target_w = window_w
-        target_h = window_h
-
-        img_h, img_w = img.shape[:2]
-
-        # Scale to cover the whole target area
-        scale = max(float(target_w) / float(img_w), float(target_h) / float(img_h))
-        new_w = max(1, int(round(img_w * scale)))
-        new_h = max(1, int(round(img_h * scale)))
-
-        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-
-        # Center-crop to exact window size
-        x0 = max(0, (new_w - target_w) // 2)
-        y0 = max(0, (new_h - target_h) // 2)
-
-        frame = resized[y0:y0 + target_h, x0:x0 + target_w]
-
-        return frame
-    
+        Returns {"main": [...], "support": [...]} with `count` ultradetailed
+        descriptions each. MAIN subjects sit in the bottom half and are pulled
+        upward by the SUPPORT subjects in the top half, so the pairing plays with
+        weight vs. lightness (e.g. theme 'coral reef' -> main: living corals,
+        support: a bloated balloon of plastic-bottle trash dragging them up)."""
+        prompt = (
+            "You invent subjects for a surreal fashion-editorial photo set inside a box-like chamber.\n"
+            f"THEME: '{theme}'.\n\n"
+            "Two roles:\n"
+            "- MAIN SUBJECT: sits in the bottom half, floating just above the floor, pulled upward by thin "
+            "ropes. It is heavy, tactile, physically real and rooted in the theme.\n"
+            "- SUPPORT SUBJECT: fills the top half, crushed against the ceiling as if trying to escape "
+            "upward. It adds drama and tension by pulling the main subject up — play with weight vs lightness, "
+            "or an ironic counterpart to the theme (e.g. theme 'coral reef' -> support: a bloated balloon of "
+            "plastic-bottle trash; theme 'harvest' -> support: an impossibly heavy iron anvil dragged upward).\n\n"
+            f"Generate exactly {count} MAIN subjects and {count} SUPPORT subjects, all inspired by the theme.\n"
+            "Each description must be ONE long, ultradetailed sentence (40-70 words) specifying textures, "
+            "patterns, materials, colors, surface wear and accessories — the way a macro studio photograph "
+            "would reveal them. MAIN descriptions: name the subject, then describe its physical surfaces. "
+            "SUPPORT descriptions: describe an inflated or suspended mass deforming against the box walls with "
+            "ropes or chains descending from its base.\n\n"
+            "Return strict JSON only, no markdown, with this schema:\n"
+            "{\"main\": [\"...\"], \"support\": [\"...\"]}"
+        )
+        response = self.client.models.generate_content(
+            model=self.TEXT_MODEL,
+            contents=[prompt],
+        )
+        text = self._extract_text(response)
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            raise ValueError(f"Gemini returned no JSON object for subjects: {text[:200]}")
+        data = json.loads(match.group())
+        main = [str(s) for s in data.get("main", []) if str(s).strip()]
+        support = [str(s) for s in data.get("support", []) if str(s).strip()]
+        if not main or not support:
+            raise ValueError(f"Gemini returned incomplete subjects: main={len(main)} support={len(support)}")
+        return {"main": main[:count], "support": support[:count]}
+   
 class StableDiffusion:
     def __init__(self, SD_MODEL, IW, IH, INFERENCE_STEPS=12, GUIDANCE_SCALE=3.5, SEED=80367253):
 
@@ -580,7 +555,8 @@ class StableDiffusion:
 
     # prompt_a/prompt_b are accepted for call-site compatibility; only `prompt`
     # steers the journey.
-    def generate_between_images(self, image_a_bgr, image_b_bgr, prompt="", prompt_a=None, prompt_b=None):
+    def generate_between_images(self, image_a_bgr, image_b_bgr, prompt="", prompt_a=None, prompt_b=None,
+                                interpolation_range=(0.0, 1.0)):
         latents_a = self.prepare_reference(image_a_bgr)
         latents_b = self.prepare_reference(image_b_bgr)
 
@@ -594,16 +570,51 @@ class StableDiffusion:
         sigma_min = 0.60
         sigma_max = 1.0
 
+        t_lo, t_hi = interpolation_range
         for i in range(1, self.INFERENCE_STEPS + 1):
             t = i / (self.INFERENCE_STEPS + 1)
-            alpha = 0.5 - 0.5 * np.cos(np.pi * t)
-            sigma = sigma_min + (sigma_max - sigma_min) * (1.0 - (2.0 * alpha - 1.0) ** 2)
+            alpha_unit = 0.5 - 0.5 * np.cos(np.pi * t)   # cosine ease within the step range
+            alpha = t_lo + (t_hi - t_lo) * alpha_unit      # mapped into interpolation_range
+            sigma = sigma_min + (sigma_max - sigma_min) * (1.0 - (2.0 * alpha_unit - 1.0) ** 2)
             base_latents = self.slerp(latents_a, latents_b, alpha)
             noise = self.slerp(noise_a, noise_b, alpha)
             latents = self.denoise_from_sigma(base_latents, noise, sigma, embeds, pooled)
             frame = self.decode_latents(latents)
 
             yield frame
+
+        if t_hi >= 1.0:
+            yield image_b_bgr
+
+    def generate_journey(self, image_a_bgr, image_b_bgr, prompt="",
+                         interpolation_range=(0.0, 1.0),
+                         sigma_min=0.15, sigma_max=0.35):
+        # Low sigma keeps each frame anchored to the slerp'd reference (img2img at ~15-35%
+        # strength) instead of regenerating from near-pure noise like generate_between_images.
+        # This prevents the journey from detouring through unrelated content.
+        latents_a = self.prepare_reference(image_a_bgr)
+        latents_b = self.prepare_reference(image_b_bgr)
+
+        prompt_embeds, negative_embeds, pooled_embeds, negative_pooled = self.encode_prompt(prompt)
+        embeds = torch.cat([negative_embeds, prompt_embeds], dim=0)
+        pooled = torch.cat([negative_pooled, pooled_embeds], dim=0)
+
+        noise_a = self._noise_for(image_a_bgr, latents_a)
+        noise_b = self._noise_for(image_b_bgr, latents_b)
+
+        t_lo, t_hi = interpolation_range
+        for i in range(1, self.INFERENCE_STEPS + 1):
+            t = i / (self.INFERENCE_STEPS + 1)
+            alpha_unit = 0.5 - 0.5 * np.cos(np.pi * t)
+            alpha = t_lo + (t_hi - t_lo) * alpha_unit
+            sigma = sigma_min + (sigma_max - sigma_min) * (1.0 - (2.0 * alpha_unit - 1.0) ** 2)
+            base_latents = self.slerp(latents_a, latents_b, alpha)
+            noise = self.slerp(noise_a, noise_b, alpha)
+            latents = self.denoise_from_sigma(base_latents, noise, sigma, embeds, pooled)
+            yield self.decode_latents(latents)
+
+        if t_hi >= 1.0:
+            yield image_b_bgr
 
 class AnimateDiff:
     def __init__(self, CONTROLNET_ID, MOTION_ADAPTER, SD_BASE, MOTION_LORAS, IW, IH, NUM_FRAMES=16, INFERENCE_STEPS=10, GUIDANCE_SCALE=7.5, CONTROLNET_SCALE=0.5, SEED=80367253):
@@ -725,6 +736,91 @@ class SuperResolution:
             result = self.model(tensor).squeeze(0).clamp(0, 1)
         out = result.permute(1, 2, 0).mul(255.0).byte().cpu().numpy()
         return cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+
+class FramePack:
+    def __init__(self, transformer_path, base_path, image_w, image_h,
+                 inference_steps=10, guidance_scale=6.0, true_cfg_scale=1.0,
+                 latent_window=9, seed=42,
+                 siglip_path="google/siglip-so400m-patch14-384",
+                 cpu_offload=True):
+        from diffusers import (
+            HunyuanVideoFramepackPipeline,
+            HunyuanVideoFramepackTransformer3DModel,
+        )
+        from transformers import SiglipVisionModel, SiglipImageProcessor
+
+        self.IW = image_w
+        self.IH = image_h
+        self.INFERENCE_STEPS = inference_steps
+        self.GUIDANCE_SCALE = guidance_scale
+        self.TRUE_CFG_SCALE = true_cfg_scale
+        self.LATENT_WINDOW = latent_window
+        self.DEVICE = "cuda"
+
+        print("Loading FramePack transformer...")
+        transformer = HunyuanVideoFramepackTransformer3DModel.from_pretrained(
+            transformer_path,
+            torch_dtype=torch.bfloat16,
+            local_files_only=True,
+        )
+
+        # SigLIP is not part of the base HunyuanVideo model; load separately.
+        # Downloads ~1.1 GB on first run, then uses the HuggingFace cache.
+        print(f"Loading SigLIP image encoder ({siglip_path})...")
+        image_encoder   = SiglipVisionModel.from_pretrained(siglip_path, torch_dtype=torch.bfloat16)
+        feature_extractor = SiglipImageProcessor.from_pretrained(siglip_path)
+
+        print("Loading FramePack pipeline (HunyuanVideo base)...")
+        self.pipe = HunyuanVideoFramepackPipeline.from_pretrained(
+            base_path,
+            transformer=transformer,
+            image_encoder=image_encoder,
+            feature_extractor=feature_extractor,
+            torch_dtype=torch.bfloat16,
+            local_files_only=True,
+        )
+        self.pipe.vae.enable_slicing()
+        self.pipe.vae.enable_tiling()
+        if cpu_offload:
+            self.pipe.enable_model_cpu_offload()
+        else:
+            self.pipe.to("cuda")
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+        self.pipe.set_progress_bar_config(disable=True)
+        self._seed = seed
+        print("✓ FramePack ready")
+
+    def _bgr_to_pil(self, bgr):
+        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).resize(
+            (self.IW, self.IH), Image.LANCZOS
+        )
+
+    def _pil_to_bgr(self, pil):
+        return cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+    def generate(self, image_bgr, prompt="", num_frames=9, last_frame_bgr=None):
+        """Predict num_frames of continuation from image_bgr.
+        Returns a list of BGR numpy arrays (the generated frames)."""
+        pil       = self._bgr_to_pil(image_bgr)
+        last_pil  = self._bgr_to_pil(last_frame_bgr) if last_frame_bgr is not None else None
+        generator = torch.Generator("cpu").manual_seed(self._seed)
+
+        with torch.inference_mode():
+            result = self.pipe(
+                image=pil,
+                last_image=last_pil,
+                prompt=prompt,
+                height=self.IH,
+                width=self.IW,
+                num_frames=num_frames,
+                latent_window_size=self.LATENT_WINDOW,
+                num_inference_steps=self.INFERENCE_STEPS,
+                guidance_scale=self.GUIDANCE_SCALE,
+                true_cfg_scale=self.TRUE_CFG_SCALE,
+                generator=generator,
+            )
+        return [self._pil_to_bgr(f) for f in result.frames[0]]
 
 class OpticalFlow:
     def __init__(self):

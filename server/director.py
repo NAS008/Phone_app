@@ -234,7 +234,7 @@ class Director:
             t = now - self._t0
             self._rule_mouse(now, t)
             self._rule_fov_zoom_auto_play(now, t)
-            self._sim_go_back = True
+            self._rule_go_back(now, t)
             self._rule_constraints(t)
             self._rule_gradient(t)
         elif self._mode == "auto_gen":

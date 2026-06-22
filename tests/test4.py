@@ -15,7 +15,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from ray import RayTracer
 from sim import Simulator
 from ui import Mouse
-from ai import Folder
+from file import File
 
 async def main():
     config = Config()
@@ -29,7 +29,7 @@ async def main():
         smooth=3,
         dt=1.0 / config.FPS_SIM,
     )
-    folder = Folder(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
+    folder = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     img = folder.load_image()
     sim.new_image(img, depth_factor=0.25)
     sim_goback_on = False

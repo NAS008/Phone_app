@@ -22,7 +22,6 @@ import msgpack
 import redis
 import urllib.parse
 import sys as _sys, os as _os
-from PIL import Image
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from google import genai
@@ -31,6 +30,10 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from config import Config
 from bus import Bus
 from turn import CloudflareTurn
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
+from file import File
+
+_file = File(Config.IMAGE_W, Config.IMAGE_H)
 
 def _now_ms():
     return int(time.time() * 1000)
@@ -48,20 +51,6 @@ def _coerce_bytes(value):
         return base64.b64decode(value)
     raise TypeError(f"Unsupported binary type: {type(value).__name__}")
 
-def _crop_image(data: bytes, iw: int, ih: int) -> bytes:
-    img = Image.open(io.BytesIO(data))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    w, h = img.size
-    scale = max(iw / w, ih / h)
-    new_w, new_h = int(w * scale), int(h * scale)
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    left = (new_w - iw) // 2
-    top = (new_h - ih) // 2
-    img = img.crop((left, top, left + iw, top + ih))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG")
-    return buf.getvalue()
 
 def _normalize_http_part(part):
     kind = part.get("kind")
@@ -71,7 +60,7 @@ def _normalize_http_part(part):
 
     if kind == "image":
         raw = _coerce_bytes(part.get("data"))
-        processed = _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H)
+        processed = _file.pil_to_bytes(_file.bytes_to_pil(raw, fit=True))
         return {
             "kind": "image",
             "mime_type": "image/jpeg",
@@ -94,7 +83,7 @@ def _normalize_http_payload_to_bus_message(payload):
                 "kind": "image",
                 "mime_type": "image/jpeg",
                 "purpose": payload.get("image_purpose", "input"),
-                "data": _crop_image(raw, Config.IMAGE_W, Config.IMAGE_H),
+                "data": _file.pil_to_bytes(_file.bytes_to_pil(raw, fit=True)),
             })
     else:
         parts = [_normalize_http_part(part) for part in parts]

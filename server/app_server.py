@@ -17,15 +17,14 @@
 import asyncio
 import concurrent.futures
 import random
-import cv2
 import numpy as np
-from PIL import Image
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'shared'))
 from config import Config
 from bus import Bus
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'server'))
-from ai import Gemini, GeminiBlockedError, StableDiffusion, AnimateDiff, Folder
+from ai import Gemini, GeminiBlockedError, StableDiffusion, AnimateDiff
+from file import File
 from brand import Brand
 
 def extract_first_text(parts):
@@ -40,40 +39,9 @@ def extract_first_image(parts):
             return part
     return None
 
-def jpeg_to_bgr(image_bytes):
-    return cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-
-def bgr_to_jpeg(image_bgr, quality=85):
-    ok, enc = cv2.imencode(".jpg", image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-    if not ok:
-        raise ValueError("Failed to encode image")
-    return enc.tobytes()
-
-def bgr_to_pil(bgr):
-    return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-
-def pil_to_bgr(pil_img):
-    return cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
-
-def resize_image_bytes_jpeg(image_bytes, size, quality=85):
-    img_bgr = jpeg_to_bgr(image_bytes)
-    if img_bgr is None:
-        raise ValueError("Failed to decode image bytes")
-    img_bgr = cv2.resize(img_bgr, (size, size), interpolation=cv2.INTER_AREA)
-    return bgr_to_jpeg(img_bgr, quality)
-
-def crop_center_resize(img_bgr, target_w, target_h):
-    h, w = img_bgr.shape[:2]
-    scale = max(target_w / w, target_h / h)
-    sw, sh = int(round(w * scale)), int(round(h * scale))
-    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-    img_bgr = cv2.resize(img_bgr, (sw, sh), interpolation=interp)
-    cy = (sh - target_h) // 2
-    cx = (sw - target_w) // 2
-    return img_bgr[cy:cy + target_h, cx:cx + target_w]
-
 async def main():
     config = Config()
+    file = File(config.IMAGE_W, config.IMAGE_H, config.INPUT_FOLDER)
     loop = asyncio.get_running_loop()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
@@ -100,19 +68,10 @@ async def main():
     last_sd_prompt = ""
     _sd = None
     _ad = None
-    _folder = None
-
-    def get_folder():
-        nonlocal _folder
-        if _folder is None:
-            _folder = Folder(image_w=config.IMAGE_W, image_h=config.IMAGE_H, input_folder=config.INPUT_FOLDER)
-            print(f"✓ Server: Folder ready ({len(_folder.paths)} images)")
-        return _folder
 
     def folder_image_or_black():
-        # Seed for journeys: emerge from real artwork instead of darkness.
         try:
-            return get_folder().load_image()
+            return file.load_image()
         except Exception as e:
             print(f"✗ Server: folder seed failed, starting from black: {e}")
             return np.zeros((config.IMAGE_H, config.IMAGE_W, 3), dtype=np.uint8)
@@ -203,10 +162,10 @@ async def main():
 
         if not parts:
             # ── Pick from folder ─────────────────────────────────────────────
-            img_bgr = await loop.run_in_executor(executor, lambda: get_folder().load_image())
+            img_bgr = await loop.run_in_executor(executor, file.load_image)
             last_generated_image_bgr = img_bgr
             last_sd_prompt = ""
-            image_bytes = bgr_to_jpeg(img_bgr)
+            image_bytes = file.cv2_to_bytes(img_bgr, ".jpg", 85)
             print(f"✓ Server: picked image from folder ({len(image_bytes) // 1024} KB)")
             await bus.publish_ai_message_to_pc(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
@@ -258,9 +217,9 @@ async def main():
 
             image_part = extract_first_image(effective_parts)
             if image_part:
-                anchor_bgr = jpeg_to_bgr(image_part["data"])
+                anchor_bgr = file.bytes_to_cv2(image_part["data"])
                 if anchor_bgr is not None:
-                    anchor_bgr = crop_center_resize(anchor_bgr, config.IMAGE_W, config.IMAGE_H)
+                    anchor_bgr = file.resize_to_fit(anchor_bgr)
                 else:
                     anchor_bgr = last_generated_image_bgr
             else:
@@ -285,7 +244,7 @@ async def main():
                     "negative": "close-up, indoor, blurry, watermark, text",
                     "loras": loras,
                 }
-                clip_anchor_pil = bgr_to_pil(clip_anchor_bgr)
+                clip_anchor_pil = file.cv2_to_pil(clip_anchor_bgr)
                 print(f"✓ Server: AnimateDiff clip {clip_i + 1}/{n_clips} — prompt='{full_prompt}', lora={lora_name}")
 
                 try:
@@ -303,7 +262,7 @@ async def main():
 
                 try:
                     for pil_frame in frames:
-                        frame_bytes = bgr_to_jpeg(pil_to_bgr(pil_frame))
+                        frame_bytes = file.cv2_to_bytes(file.pil_to_cv2(pil_frame), ".jpg", 85)
                         await bus.publish_ai_message_to_pc(
                             session_id=effective_session_id, nickname="NonCarbon Artist",
                             image_bytes=frame_bytes, image_mime_type="image/jpeg",
@@ -313,14 +272,14 @@ async def main():
                 except Exception as e:
                     print(f"✗ Server: AnimateDiff frame publish failed: {e}")
 
-                clip_anchor_bgr = pil_to_bgr(frames[-1])
+                clip_anchor_bgr = file.pil_to_cv2(frames[-1])
 
             last_generated_image_bgr = clip_anchor_bgr
             last_sd_prompt = f"{prompt_text}, {style_suffix}" if style_suffix else prompt_text
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
                 text="Moving!",
-                image_bytes=bgr_to_jpeg(clip_anchor_bgr), image_mime_type="image/jpeg",
+                image_bytes=file.cv2_to_bytes(clip_anchor_bgr, ".jpg", 85), image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
             return
@@ -347,8 +306,8 @@ async def main():
                 await _publish_error(effective_session_id, "SD image generation failed. Please try again.", turn_id)
                 return
 
-            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
-            kb = len(bgr_to_jpeg(new_bgr)) // 1024
+            new_bgr = file.resize_to_fit(new_bgr)
+            kb = len(file.cv2_to_bytes(new_bgr, ".jpg", 85)) // 1024
             print(f"✓ Server: SD generated {kb} KB — {prompt_text}")
 
             prev_bgr = last_generated_image_bgr
@@ -379,7 +338,7 @@ async def main():
                         break
                     await bus.publish_ai_message_to_pc(
                         session_id=effective_session_id, nickname="NonCarbon Artist",
-                        image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
+                        image_bytes=file.cv2_to_bytes(frame, ".jpg", 85), image_mime_type="image/jpeg",
                         image_purpose="output", turn_id=turn_id,
                     )
                     frame_count += 1
@@ -390,7 +349,7 @@ async def main():
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
                 text="Check this!",
-                image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                image_bytes=file.cv2_to_bytes(new_bgr, ".jpg", 85), image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
             return
@@ -412,12 +371,12 @@ async def main():
                 print("✗ Server: painter mode — Gemini returned no image")
                 return
 
-            new_bgr = jpeg_to_bgr(image_part["data"])
+            new_bgr = file.bytes_to_cv2(image_part["data"])
             if new_bgr is None:
                 return
-            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
+            new_bgr = file.resize_to_fit(new_bgr)
             last_generated_image_bgr = new_bgr
-            image_bytes = bgr_to_jpeg(new_bgr)
+            image_bytes = file.cv2_to_bytes(new_bgr, ".jpg", 85)
             print(f"✓ Server: painter mode — Gemini image {len(image_bytes) // 1024} KB — {result.get('prompt', '')}")
             await bus.publish_ai_message_to_pc(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
@@ -482,11 +441,11 @@ async def main():
                 await _publish_error(effective_session_id, fallback, turn_id)
                 return
 
-            new_bgr = jpeg_to_bgr(image_part["data"])
+            new_bgr = file.bytes_to_cv2(image_part["data"])
             if new_bgr is None:
                 await _publish_error(effective_session_id, "Failed to decode generated image.", turn_id)
                 return
-            new_bgr = crop_center_resize(new_bgr, config.IMAGE_W, config.IMAGE_H)
+            new_bgr = file.resize_to_fit(new_bgr)
             prompt_used = result.get("prompt", "")
             kb = len(image_part["data"]) // 1024
             print(f"✓ Server: Gemini image {kb} KB — {prompt_used}")
@@ -529,7 +488,7 @@ async def main():
                             break
                         await bus.publish_ai_message_to_pc(
                             session_id=effective_session_id, nickname="NonCarbon Artist",
-                            image_bytes=bgr_to_jpeg(frame), image_mime_type="image/jpeg",
+                            image_bytes=file.cv2_to_bytes(frame, ".jpg", 85), image_mime_type="image/jpeg",
                             image_purpose="output", turn_id=turn_id,
                         )
                         frame_count += 1
@@ -540,14 +499,14 @@ async def main():
                 # Mode 0: send Gemini result directly.
                 await bus.publish_ai_message_to_pc(
                     session_id=effective_session_id, nickname="NonCarbon Artist",
-                    image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                    image_bytes=file.cv2_to_bytes(new_bgr, ".jpg", 85), image_mime_type="image/jpeg",
                     image_purpose="output", turn_id=turn_id,
                 )
 
             await bus.publish_ai_message_to_phone(
                 session_id=effective_session_id, nickname="NonCarbon Artist",
                 text="Check this!",
-                image_bytes=bgr_to_jpeg(new_bgr), image_mime_type="image/jpeg",
+                image_bytes=file.cv2_to_bytes(new_bgr, ".jpg", 85), image_mime_type="image/jpeg",
                 image_purpose="output", turn_id=turn_id,
             )
             return

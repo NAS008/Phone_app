@@ -56,6 +56,7 @@ from ui import Camera, Mic, Mouse
 from director import Director
 from stream import FrameBus, StreamingServer, build_ice_servers
 from brand import Brand
+from file import File
 
 def get_first_part(parts, kind):
     for part in parts or []:
@@ -69,34 +70,6 @@ def get_image_bytes_from_parts(parts):
         return None
     return part.get("data")
 
-def crop_center_resize(img_bgr, target_w, target_h):
-    h, w = img_bgr.shape[:2]
-    scale = max(target_w / w, target_h / h)
-    sw, sh = int(round(w * scale)), int(round(h * scale))
-    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-    img_bgr = cv2.resize(img_bgr, (sw, sh), interpolation=interp)
-    cy = (sh - target_h) // 2
-    cx = (sw - target_w) // 2
-    return img_bgr[cy:cy + target_h, cx:cx + target_w]
-
-def get_image_bytes(image_bgr, image_size=0, quality=85):
-    if image_size > 0:
-        h, w = image_bgr.shape[:2]
-
-        if h <= w:
-            new_h = image_size
-            new_w = int(round(w * (image_size / h)))
-        else:
-            new_w = image_size
-            new_h = int(round(h * (image_size / w)))
-        resized = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        ok, buffer = cv2.imencode('.jpg', resized, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-    else:
-        ok, buffer = cv2.imencode('.jpg', image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-        
-    if not ok:
-        raise ValueError('✗ PC: JPEG encoding failed')
-    return buffer.tobytes()
 
 def overlay(frame, overlay_img, proportion=16, alignment="center"):
     out = frame.copy()
@@ -187,6 +160,7 @@ def overlay_fixed(frame, overlay_img, x0, y0):
 
 async def main():
     config = Config()
+    file = File(config.IMAGE_W, config.IMAGE_H)
 
     of = OpticalFlow()
     super = SuperResolution(config.MODELS_FOLDER)
@@ -205,7 +179,7 @@ async def main():
     sim_gradient_mode = 0
     sim_world_mode = 0
     img_a = cv2.imread(r"..\..\input\19.png")
-    img_a = crop_center_resize(img_a, config.IMAGE_W, config.IMAGE_H)
+    img_a = file.resize_to_fit(img_a)
     img_a_hires = super.upscale(img_a)
     sim.new_image(img_a_hires)
     logo = cv2.imread(r"..\..\brand\logo_white.png")
@@ -348,7 +322,7 @@ async def main():
         if img_b is None:
             return {"ok": False, "error": "✗ PC: failed to decode received image"}
 
-        img_b = crop_center_resize(img_b, config.IMAGE_W, config.IMAGE_H)
+        img_b = file.resize_to_fit(img_b)
         img_b_hires = super.upscale(img_b)
         interpolated = of.interpolate(start_img_hires, img_b_hires, config.OF_FRAMES)
         generated_frames = [interp for interp in (interpolated or []) if interp is not None]
@@ -479,7 +453,7 @@ async def main():
             return
 
         out = overlay_fixed(frame, logo_overlay, logo_x0, logo_y0)
-        image_bytes = get_image_bytes(out)
+        image_bytes = file.cv2_to_bytes(out, ".jpg", 85)
         await bus.publish_ai_message_to_phone(
             session_id=session_id,
             nickname="NonCarbon Artist",

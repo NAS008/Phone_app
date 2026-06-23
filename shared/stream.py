@@ -33,7 +33,7 @@ try:
     # aiortc 1.14 hard-caps VP8 at 1.5 Mbps; raise it so target_bitrate is honoured.
     _vpx.MAX_BITRATE = 80_000_000
 except ImportError:
-    pass
+    VideoStreamTrack = object  # dummy so CvVideoTrack can be defined without streaming deps
 
 STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 _VIDEO_CLOCK_RATE = 90_000

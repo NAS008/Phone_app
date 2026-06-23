@@ -297,6 +297,10 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "settings": self.server.settings_store.get()})
             return
 
+        if parsed.path == "/api/config":
+            self.send_json({"adminNickname": Config.ADMIN_NICKNAME})
+            return
+
         if parsed.path == "/api/turn_credentials":
             # Short-lived Cloudflare TURN credentials for the webapp's
             # RTCPeerConnection; empty list when TURN is not configured.

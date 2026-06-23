@@ -3,14 +3,19 @@ from dotenv import load_dotenv as _load_dotenv
 _load_dotenv(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '.env'))
 
 class Config:
-    # App
-    URL = "https://tfnca.com"
-    ADMIN_SESSION_ID = "1234"  # change this whenever you want; all apps accept it
+
+    # APP CONFIG
+    # -----------------------------------------------------------------------------
     APP_NAME = "ARTIST"
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
-    MODELS_FOLDER  = r"../../models"
-    WINDOW_W, WINDOW_H = 2048, 2048#1024, 1024#1152, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 1920, 1080#1024, 1024#1152, 2048#512, 512#1080, 1080#2160, 2160
+    FPS = 10
+    VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
+
+
+    # SIM CONFIG
+    # -----------------------------------------------------------------------------
     IMAGE_W = (WINDOW_W // 4) // 16 * 16
     IMAGE_H = (WINDOW_H // 4) // 16 * 16
     GRID_SIZE = 128
@@ -24,7 +29,16 @@ class Config:
         GY = GRID_SIZE
     GZ = GRID_SIZE // 4
     G = [GX, GY, GZ]
-    LAYERS = 3
+    LAYERS = 1
+    world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
+    world_radius = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.4 * GZ / GRID_SIZE]
+    SIM_SPEED = 0.1  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
+    FPS_SIM = FPS * 2
+    MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
+
+
+    # RAY CONFIG
+    # -----------------------------------------------------------------------------
     camera = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 1.0]
     target = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.0]
     light = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.6]    
@@ -33,61 +47,16 @@ class Config:
     background = [0.0, 0.0, 0.0]
     ambient = 0.6
     shadow = 0.3
-    FPS = 10
-    FPS_SIM = FPS * 2
-    SIM_SPEED = 0.1  # 1.0 = real-time, 0.5 = half-speed (slower particles, better stream detail)
-    MAX_SIM_STEPS_PER_LOOP = 2 * FPS_SIM / FPS
-    VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
-    world_center = [0.5 * GX / max(GX, GY), 0.5 * GY / max(GX, GY), 0.5 * GZ / GRID_SIZE]
-    world_radius = [0.4 * GX / max(GX, GY), 0.4 * GY / max(GX, GY), 0.4 * GZ / GRID_SIZE]
 
-    # UI
-    UI_POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
-    UI_CHANNELS = ["mouse", "cam", "mic"]
-    UI_CHANNEL = UI_CHANNELS[2]
-    
-    # Context
-    CONTEXT_SIZE = 20  # max conversation turns kept per session
-    MAX_USERS = 5
 
-    # Phone backend (for direct HTTP uploads that bypass the bus)
-    PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
-
-    # Bus
-    redis_host     = "tfnca-redis.redis.cache.windows.net"
-    redis_port     = 6380
-    redis_password = __import__('os').environ.get('REDIS_PASSWORD', '')
-    redis_ssl      = True
-
-    # Painter
-    MAX_DIM = 512
-    MAX_STROKES = 1000
-    IMPASTO_Z = 0.4
-
-    # Streaming
-    stream_on = True
-    STREAM_MAX_SIDE = 0           # 0 is for the window resolution
-    STREAM_BITRATE = 80_000_000   # VP9 target bitrate ceiling — WebRTC CC reduces this on limited links
-    HOST_IP = "192.168.68.60"
-    # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
-    # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a
-    # key under Cloudflare dashboard → Realtime → TURN Server, then set both
-    # env vars on the PC and on Railway (backend).
-    CF_TURN_KEY_ID    = _os.environ.get('CF_TURN_KEY_ID', '')
-    CF_TURN_API_TOKEN = _os.environ.get('CF_TURN_API_TOKEN', '')
-    CF_TURN_TTL       = 86400  # credential lifetime (s); auto-refreshed at 80%
-    # Fallback: static self-hosted relay, e.g. TURN_URL="turn:<vm-ip>:3478".
-    TURN_URL      = _os.environ.get('TURN_URL', '')
-    TURN_USERNAME = _os.environ.get('TURN_USERNAME', '')
-    TURN_PASSWORD = _os.environ.get('TURN_PASSWORD', '')
-    VIEWER_HTML = r"../tests/viewer.html"
-    GIF_DIFF_THRESHOLD = 3.0  # mean abs pixel diff (0-255) required to add a frame
-
+    # AI CONFIG
+    # -----------------------------------------------------------------------------
     # Google
     GEMINI_API_KEY = __import__('os').environ.get('GEMINI_API_KEY', '')
     GEMINI_TEXT_MODEL = "gemini-2.5-flash"
     GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
     GEMINI_STT_MODEL = "gemini-2.5-flash"
+    CONTEXT_SIZE = 20  # max conversation turns
 
     # Stable Diffusion
     SD_MODEL = r"C:\Users\NAS\Models\stable-diffusion-3.5-medium"
@@ -109,13 +78,51 @@ class Config:
     DISPLAY_MAXFRAMES = 500
     GLOBAL_STYLE    = "minimalist"
     GLOBAL_NEGATIVE = "close-up, indoor, blurry, watermark, text"
+    MOTION_LORAS = [
+        # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
+        ("zoom-in",  0.8, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),
+        ("zoom-out", 0.8, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out"),
+        ("pan-left", 0.8, "drifting left",               "guoyww/animatediff-motion-lora-pan-left"),
+        ("pan-right",0.8, "drifting right",              "guoyww/animatediff-motion-lora-pan-right"),
+        ("tilt-up",  0.8, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up"),
+        ("tilt-down",0.8, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down"),
+        ("roll-cw",  0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
+        ("roll-ccw", 0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
+        (None,       None, "sways gently in the wind",    None),
+    ]
+    SUBJECTS = [
+        "colossal shell",
+        #"tiny abandoned house floating",
+        #"jellyfish beneath a hot air balloon",
+        #"tiny seagulls in the horizon",
+        "colossal ivory white sculptural on the beach",
+        #"a giant ship stuck in the sand",
+        "giant wave",
+        "person with pomegranate diving helmet and scarf on the desert",
+        #"person with thick black goggles and indigo blue scarf on the desert",
+        #"person with thick black goggles and covid mask on orange desert",
+        "colossal barnacled shell",
+        #"kinetic sculpture on the beach",
+        #"crowd of people rushing on the orange subway",
+        #"crowd of people with red kart in supermarket",
+        #"crowd of people with shopping carts in crowded supermarket",
+        #"birds eye of beach",
+        #"birds eye of crowded city with red bridges",
+        #"colossal red coral sculpture on the beach",
+        #"colossal sea anemone in the desert",
+        "pufferfish flying in the sky like a balloon",
+        #"waterfall in forest",
+        #"alien ship in the sea",
+        #"rusty toaster on the beach",
+    ]
 
     # Optical flow
     OF_FRAMES = 5
 
+    # SuperResolution
+    MODELS_FOLDER  = r"../../models"
+
     # FramePack (image-to-video next-frame prediction via HunyuanVideo backbone)
-    # Download: huggingface-cli download lllyasviel/FramePack_F1_I2V_HY_20250503
-    #           huggingface-cli download hunyuanvideo-community/HunyuanVideo
     FP_TRANSFORMER_PATH = r"C:\Users\NAS\Models\FramePack_F1_I2V_HY_20250503"
     FP_BASE_PATH        = r"C:\Users\NAS\Models\HunyuanVideo"
     FP_LATENT_WINDOW    = 9        # bars per batch = ceil(NUM_FRAMES / LATENT_WINDOW); set equal for 1 bar
@@ -384,44 +391,61 @@ class Config:
         }
     }
 
-    # Director (auto-play)
+
+    # BUS CONFIG
+    # ----------------------------------------------------------------------------- 
+    redis_host     = "tfnca-redis.redis.cache.windows.net"
+    redis_port     = 6380
+    redis_password = __import__('os').environ.get('REDIS_PASSWORD', '')
+    redis_ssl      = True
+
+
+    # DIRECTOR CONFIG
+    # -----------------------------------------------------------------------------
     DIRECTOR_PROMPT_INTERVAL = 20    # seconds between AI-generated prompts
 
-    MOTION_LORAS = [
-        # (lora_name, weight, hint, repo)  — all repos use diffusion_pytorch_model.safetensors
-        ("zoom-in",  0.8, "approaching, growing larger", "guoyww/animatediff-motion-lora-zoom-in"),
-        ("zoom-out", 0.8, "receding into distance",      "guoyww/animatediff-motion-lora-zoom-out"),
-        ("pan-left", 0.8, "drifting left",               "guoyww/animatediff-motion-lora-pan-left"),
-        ("pan-right",0.8, "drifting right",              "guoyww/animatediff-motion-lora-pan-right"),
-        ("tilt-up",  0.8, "rising upward",               "guoyww/animatediff-motion-lora-tilt-up"),
-        ("tilt-down",0.8, "falling downward",            "guoyww/animatediff-motion-lora-tilt-down"),
-        ("roll-cw",  0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-clockwise"),
-        ("roll-ccw", 0.8, "slowly rotating",             "guoyww/animatediff-motion-lora-rolling-anticlockwise"),
-        (None,       None, "sways gently in the wind",    None),
-    ]
 
-    SUBJECTS = [
-        "colossal shell",
-        #"tiny abandoned house floating",
-        #"jellyfish beneath a hot air balloon",
-        #"tiny seagulls in the horizon",
-        "colossal ivory white sculptural on the beach",
-        #"a giant ship stuck in the sand",
-        "giant wave",
-        "person with pomegranate diving helmet and scarf on the desert",
-        #"person with thick black goggles and indigo blue scarf on the desert",
-        #"person with thick black goggles and covid mask on orange desert",
-        "colossal barnacled shell",
-        #"kinetic sculpture on the beach",
-        #"crowd of people rushing on the orange subway",
-        #"crowd of people with red kart in supermarket",
-        #"crowd of people with shopping carts in crowded supermarket",
-        #"birds eye of beach",
-        #"birds eye of crowded city with red bridges",
-        #"colossal red coral sculpture on the beach",
-        #"colossal sea anemone in the desert",
-        "pufferfish flying in the sky like a balloon",
-        #"waterfall in forest",
-        #"alien ship in the sea",
-        #"rusty toaster on the beach",
-    ]
+    # PAINTER CONFIG
+    # -----------------------------------------------------------------------------     
+    MAX_DIM = 512
+    MAX_STROKES = 1000
+    IMPASTO_Z = 0.4
+    
+    
+    # SESSION CONFIG
+    # -----------------------------------------------------------------------------
+    URL = "https://tfnca.com"
+    MAX_USERS = 5
+    ADMIN_NICKNAME = "NAS"
+    ADMIN_SESSION_ID = "1234"  # change this whenever you want; all apps accept it
+
+
+    # STREAMING CONFIG
+    # -----------------------------------------------------------------------------    
+    stream_on = True
+    STREAM_MAX_SIDE = 0           # 0 is for the window resolution
+    STREAM_BITRATE = 80_000_000   # VP9 target bitrate ceiling — WebRTC CC reduces this on limited links
+    HOST_IP = "192.168.68.60"
+    # TURN relay — required for viewers on mobile data (CGNAT blocks STUN-only).
+    # Preferred: Cloudflare's free TURN service (dynamic credentials). Create a
+    # key under Cloudflare dashboard → Realtime → TURN Server, then set both
+    # env vars on the PC and on Railway (backend).
+    CF_TURN_KEY_ID    = _os.environ.get('CF_TURN_KEY_ID', '')
+    CF_TURN_API_TOKEN = _os.environ.get('CF_TURN_API_TOKEN', '')
+    CF_TURN_TTL       = 86400  # credential lifetime (s); auto-refreshed at 80%
+    # Fallback: static self-hosted relay, e.g. TURN_URL="turn:<vm-ip>:3478".
+    TURN_URL      = _os.environ.get('TURN_URL', '')
+    TURN_USERNAME = _os.environ.get('TURN_USERNAME', '')
+    TURN_PASSWORD = _os.environ.get('TURN_PASSWORD', '')
+    VIEWER_HTML = r"../tests/viewer.html"
+    GIF_DIFF_THRESHOLD = 3.0  # mean abs pixel diff (0-255) required to add a frame
+    # Phone backend (for direct HTTP uploads that bypass the bus)
+    PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
+
+
+    # UI CONFIG
+    # -----------------------------------------------------------------------------    
+    UI_POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
+    UI_CHANNELS = ["mouse", "cam", "mic"]
+    UI_CHANNEL = UI_CHANNELS[2]
+

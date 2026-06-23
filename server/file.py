@@ -93,3 +93,20 @@ class File:
     def pil_to_cv2(self, img: Image.Image, fit: bool = False) -> np.ndarray:
         result = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
         return self.resize_to_fit(result) if fit else result
+
+    # ── Frame accumulator ─────────────────────────────────────────────────────
+
+    def accumulate(self, frame: np.ndarray, weight: float = 0.85) -> np.ndarray:
+        """Blend frame into a running float buffer; returns the blended uint8 result.
+
+        weight controls how much history is retained (0 = no history, 1 = freeze).
+        Call reset_accumulator() to clear the buffer between sequences.
+        """
+        current = frame.astype(np.float32)
+        if not hasattr(self, "_accumulator") or self._accumulator is None or self._accumulator.shape != current.shape:
+            self._accumulator = current.copy()
+        self._accumulator = self._accumulator * weight + current * (1.0 - weight)
+        return self._accumulator.astype(np.uint8)
+
+    def reset_accumulator(self):
+        self._accumulator = None

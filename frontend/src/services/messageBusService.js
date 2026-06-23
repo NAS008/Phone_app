@@ -116,6 +116,16 @@ class MessageBusService {
    * Returns an iceServers array, or null when TURN is not configured —
    * the stream then falls back to STUN-only (works on WiFi, not mobile data).
    */
+  async fetchConfig() {
+    try {
+      const response = await fetch(`${this.apiUrl}/api/config`);
+      if (!response.ok) return null;
+      return response.json();
+    } catch {
+      return null;
+    }
+  }
+
   async fetchIceServers() {
     try {
       const response = await fetch(`${this.apiUrl}/api/turn_credentials`);

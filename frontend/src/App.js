@@ -1,14 +1,19 @@
 import "./App.css";
 import { Loader } from "./components";
 import { QRCodePage } from "./pages";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import messageBusService from "./services/messageBusService";
 
-const ADMIN = "NAS"
-
 function App() {
   const location = useLocation();
+  const [adminNickname, setAdminNickname] = useState("NAS");
+
+  useEffect(() => {
+    messageBusService.fetchConfig()
+      .then(cfg => { if (cfg?.adminNickname) setAdminNickname(cfg.adminNickname); })
+      .catch(() => {});
+  }, []);
 
   // Session ID from QR code URL: ?session_id=<uuid>
   const urlSessionId = useMemo(() => {
@@ -16,12 +21,12 @@ function App() {
     return params.get("session_id") || "";
   }, [location.search]);
 
-  // null = not joined yet; ADMIN or any string = joined
+  // null = not joined yet; adminNickname or any string = joined
   const [nickname, setNickname] = useState(null);
   // For ADMIN: the session they typed in (overrides urlSessionId)
   const [adminSessionId, setAdminSessionId] = useState(null);
 
-  const isAdmin = nickname === ADMIN;
+  const isAdmin = nickname === adminNickname;
   const sessionId = isAdmin ? (adminSessionId || "") : urlSessionId;
 
   // Called by Loader when a normal user submits their nickname
@@ -35,9 +40,9 @@ function App() {
   // Called by Loader when ADMIN submits their session ID — jumps straight to main app
   const handleAdminSessionSubmit = (sid) => {
     setAdminSessionId(sid);
-    setNickname(ADMIN);
+    setNickname(adminNickname);
     messageBusService
-      .sendUserJoined(sid, ADMIN)
+      .sendUserJoined(sid, adminNickname)
       .catch((err) => console.warn("user_joined publish failed:", err));
   };
 
@@ -47,7 +52,7 @@ function App() {
       <Loader
         isClaimMode={true}
         sessionId={urlSessionId}
-        adminNickname={ADMIN}
+        adminNickname={adminNickname}
         onNicknameSubmit={handleNicknameSubmit}
         onAdminSessionSubmit={handleAdminSessionSubmit}
         onComplete={() => {}}

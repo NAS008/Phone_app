@@ -1,4 +1,4 @@
-/* ── Shared layout for both phone and PC archivist pages ── */
+/* ── Shared layout ───────────────────────────────────────────────────── */
 
 .archivist-page {
   position: fixed;
@@ -12,11 +12,11 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   box-sizing: border-box;
   padding: 14px 14px max(20px, env(safe-area-inset-bottom));
-  gap: 10px;
   overflow: hidden;
 }
 
-/* ── Header (same as ArtistMode) ── */
+/* ── Header ───────────────────────────────────────────────────────────── */
+
 .archivist-header {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -32,197 +32,248 @@
 
 .archivist-header__logo {
   display: block;
-  width: 72px;
+  width: 60px;
   height: auto;
 }
 
 .archivist-header__copy h1 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .archivist-header__copy p {
-  margin: 3px 0 0;
-  color: #b6b6b6;
-  font-size: 12px;
-  line-height: 1.4;
+  margin: 2px 0 0;
+  color: #777;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-/* ── Transcript area ── */
-.archivist-transcript {
+/* ── Phone: centered PTT area ─────────────────────────────────────────── */
+
+.archivist-center {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(180deg, rgba(24,24,24,0.94), rgba(10,10,10,0.96));
-  box-shadow: 0 18px 48px rgba(0,0,0,0.22);
-  border-radius: 20px;
-  padding: 18px 16px;
-  overflow-y: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 36px;
+  padding: 20px 0;
 }
 
-.archivist-transcript__line {
+/* Transcript (shows above button only when speech is detected) */
+.archivist-said {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  text-align: center;
+  animation: fadeUp 0.3s ease;
 }
 
-.archivist-transcript__label {
+.archivist-said__label {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #6e6e6e;
+  color: #555;
 }
 
-.archivist-transcript__text {
-  font-size: 15px;
-  line-height: 1.6;
-  color: #f0f0f0;
+.archivist-said__text {
   margin: 0;
-  white-space: pre-wrap;
+  font-size: 16px;
+  line-height: 1.55;
+  color: #d0d0d0;
 }
 
-.archivist-transcript__text.user {
-  color: #d4d4d4;
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.archivist-transcript__text.gemini {
-  color: #fff;
-}
-
-.archivist-transcript__empty {
-  color: #4a4a4a;
-  font-size: 14px;
-  text-align: center;
-  margin: auto;
-}
-
-/* ── Status badge ── */
-.archivist-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-size: 12px;
-  color: #8a8a8a;
-  flex-shrink: 0;
-  align-self: center;
-  letter-spacing: 0.04em;
-}
-
-.archivist-status__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #3a3a3a;
-  flex-shrink: 0;
-}
-
-.archivist-status__dot.active {
-  background: #fff;
-  box-shadow: 0 0 8px rgba(255,255,255,0.6);
-  animation: pulse-dot 1.2s ease-in-out infinite;
-}
-
-.archivist-status__dot.processing {
-  background: #888;
-  animation: pulse-dot 0.8s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.45; transform: scale(0.75); }
-}
-
-/* ── PTT button (phone page) ── */
-.archivist-ptt-area {
+/* PTT button */
+.archivist-ptt-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 20px 0 6px;
-  flex-shrink: 0;
+  gap: 18px;
 }
 
 .archivist-ptt-btn {
-  position: relative;
-  width: 80px;
-  height: 80px;
+  width: 148px;
+  height: 148px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.18);
-  background: linear-gradient(145deg, rgba(40,40,40,0.9), rgba(15,15,15,0.95));
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.14);
+  background: linear-gradient(145deg, rgba(36,36,36,0.92), rgba(14,14,14,0.96));
+  box-shadow: 0 12px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.75);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  color: rgba(255,255,255,0.6);
+  transition: transform 0.12s ease, box-shadow 0.14s ease, border-color 0.14s ease, color 0.14s ease;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .archivist-ptt-btn:hover {
-  border-color: rgba(255,255,255,0.3);
+  border-color: rgba(255,255,255,0.26);
+  color: rgba(255,255,255,0.8);
 }
 
 .archivist-ptt-btn.active {
-  border-color: rgba(255,255,255,0.7);
-  background: linear-gradient(145deg, rgba(60,60,60,0.95), rgba(30,30,30,0.98));
-  box-shadow: 0 0 0 6px rgba(255,255,255,0.08), 0 8px 32px rgba(0,0,0,0.5);
+  border-color: rgba(255,255,255,0.65);
+  background: linear-gradient(145deg, rgba(52,52,52,0.96), rgba(28,28,28,0.98));
+  box-shadow:
+    0 0 0 10px rgba(255,255,255,0.06),
+    0 0 0 20px rgba(255,255,255,0.03),
+    0 12px 48px rgba(0,0,0,0.55);
   color: #fff;
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
-.archivist-ptt-btn.blocked {
-  border-color: rgba(255,255,255,0.1);
-  color: rgba(255,255,255,0.2);
-  cursor: not-allowed;
+.archivist-ptt-btn.processing {
+  border-color: rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.35);
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 12px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06); }
+  50%       { box-shadow: 0 0 0 8px rgba(255,255,255,0.06), 0 12px 48px rgba(0,0,0,0.55); }
 }
 
 .archivist-ptt-label {
   font-size: 12px;
-  color: #6e6e6e;
-  letter-spacing: 0.08em;
+  color: #555;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 500;
 }
 
-/* ── Notice toast (phone page) ── */
+/* ── Notice toast ─────────────────────────────────────────────────────── */
+
 .archivist-notice {
   position: fixed;
   top: 14px;
   left: 50%;
   z-index: 50;
   transform: translateX(-50%);
-  padding: 10px 16px;
+  padding: 10px 18px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(28,28,28,0.94);
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(28,28,28,0.96);
   backdrop-filter: blur(12px);
   font-size: 13px;
   color: #fafafa;
   white-space: nowrap;
 }
 
-/* ── PC page specifics ── */
-.archivist-pc-content {
+/* ── PC page ──────────────────────────────────────────────────────────── */
+
+.archivist-pc-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  flex: 1;
+  gap: 16px;
   min-height: 0;
+  margin-top: 12px;
 }
 
-.archivist-transcript--pc {
+.archivist-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px;
+  color: #6e6e6e;
+  align-self: center;
+  letter-spacing: 0.06em;
+}
+
+.archivist-status-bar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #333;
+  flex-shrink: 0;
+}
+
+.archivist-status-bar__dot.active {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,0.5);
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+
+.archivist-status-bar__dot.processing {
+  background: #666;
+  animation: dot-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.archivist-feed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
+  min-height: 0;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: linear-gradient(180deg, rgba(22,22,22,0.94), rgba(10,10,10,0.96));
+  border-radius: 20px;
+  padding: 20px 18px;
+  overflow-y: auto;
+}
+
+.archivist-feed__empty {
+  margin: auto;
+  color: #3a3a3a;
+  font-size: 14px;
+  text-align: center;
+}
+
+.archivist-feed__line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.archivist-feed__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #555;
+}
+
+.archivist-feed__text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.archivist-feed__text.user   { color: #c0c0c0; }
+.archivist-feed__text.gemini { color: #f0f0f0; }
+
+.archivist-pc-hint {
+  text-align: center;
+  color: #3a3a3a;
+  font-size: 12px;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.archivist-pc-hint code {
+  color: #555;
 }

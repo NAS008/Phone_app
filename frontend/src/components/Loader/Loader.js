@@ -64,8 +64,8 @@ const Loader = ({
     e.preventDefault();
     setError(null);
 
-    if (isAdminTyped) {
-      // ── ADMIN path ──
+    // Admin in artist mode: require session password
+    if (isAdminTyped && selectedMode === "artist") {
       const sid = adminSessionInput.trim();
       if (!sid) {
         setError("Please enter a session ID");
@@ -78,14 +78,14 @@ const Loader = ({
       return;
     }
 
-    // ── Normal user path ──
-    const trimmed = nickname.trim();
+    // Normal user (or admin in archivist mode — no password needed)
+    const trimmed = isAdminTyped ? adminNickname : nickname.trim();
     if (!trimmed) {
       setError("Please enter a nickname");
       return;
     }
-    if (!sessionId) {
-      // No session from QR code URL — show scan card
+    // Artist mode needs a session from a QR code; archivist does not
+    if (selectedMode === "artist" && !sessionId) {
       setShowScanQR(true);
       return;
     }
@@ -230,7 +230,7 @@ const Loader = ({
             <div className="claim-panel">
               <div className="claim-copy">
                 <h1 className="claim-title">
-                  {isAdminTyped
+                  {isAdminTyped && selectedMode === "artist"
                     ? "Admin Access"
                     : selectedMode === "archivist"
                     ? "Archivist"
@@ -239,26 +239,25 @@ const Loader = ({
               </div>
 
               <form onSubmit={handleClaimSubmit} className="claim-form">
-                {!isAdminTyped && (
-                  <div className="claim-mode-toggle">
-                    <button
-                      type="button"
-                      className={`claim-mode-btn${selectedMode === "artist" ? " active" : ""}`}
-                      onClick={() => setSelectedMode("artist")}
-                    >
-                      Artist
-                    </button>
-                    <button
-                      type="button"
-                      className={`claim-mode-btn${selectedMode === "archivist" ? " active" : ""}`}
-                      onClick={() => setSelectedMode("archivist")}
-                    >
-                      Archivist
-                    </button>
-                  </div>
-                )}
+                {/* Mode toggle — always visible */}
+                <div className="claim-mode-toggle">
+                  <button
+                    type="button"
+                    className={`claim-mode-btn${selectedMode === "artist" ? " active" : ""}`}
+                    onClick={() => setSelectedMode("artist")}
+                  >
+                    Artist
+                  </button>
+                  <button
+                    type="button"
+                    className={`claim-mode-btn${selectedMode === "archivist" ? " active" : ""}`}
+                    onClick={() => setSelectedMode("archivist")}
+                  >
+                    Archivist
+                  </button>
+                </div>
 
-                {/* ── Upper box: nickname input OR locked "ADMIN" display ── */}
+                {/* Nickname: locked display for admin, text input for everyone else */}
                 {isAdminTyped ? (
                   <div className="claim-session-panel">
                     <span className="claim-session-label">Nickname</span>
@@ -283,8 +282,8 @@ const Loader = ({
 
                 {error && <div className="claim-error">{error}</div>}
 
-                {/* ── Lower box: password input for admin only ── */}
-                {isAdminTyped && (
+                {/* Password only for admin in artist mode */}
+                {isAdminTyped && selectedMode === "artist" && (
                   <input
                     id="admin-session"
                     ref={adminSessionRef}
@@ -304,22 +303,21 @@ const Loader = ({
                   type="submit"
                   disabled={
                     isSubmitting ||
-                    (isAdminTyped
-                      ? !adminSessionInput.trim()
-                      : !nickname.trim())
+                    (!isAdminTyped && !nickname.trim()) ||
+                    (isAdminTyped && selectedMode === "artist" && !adminSessionInput.trim())
                   }
                   className="claim-button"
                 >
                   {isSubmitting
-                    ? isAdminTyped
-                      ? "Connecting..."
-                      : selectedMode === "archivist"
+                    ? selectedMode === "archivist"
                       ? "Starting..."
+                      : isAdminTyped
+                      ? "Connecting..."
                       : "Joining..."
-                    : isAdminTyped
-                    ? "Connect"
                     : selectedMode === "archivist"
                     ? "Start Conversation"
+                    : isAdminTyped
+                    ? "Connect"
                     : "Join Session"}
                 </button>
               </form>

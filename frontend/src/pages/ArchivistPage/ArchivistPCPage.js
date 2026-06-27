@@ -2,127 +2,92 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./ArchivistPage.css";
 import officialLogo from "../../assets/logo/the-first-noncarbon-artist.png";
 
-const WS_URL = process.env.REACT_APP_ARCHIVIST_WS_URL || "ws://localhost:8890";
-const RECEIVE_RATE = 24000; // Gemini output sample rate
+const WS_URL       = process.env.REACT_APP_ARCHIVIST_WS_URL || "ws://localhost:8890";
+const RECEIVE_RATE = 24000;
 
-// ── Gapless PCM16 playback scheduler ─────────────────────────────────────────
+// ── Gapless PCM16 → AudioContext player ──────────────────────────────────────
 
-function createAudioPlayer(sampleRate) {
+function makePlayer(sampleRate) {
   const ctx = new AudioContext({ sampleRate });
-  let nextPlayTime = ctx.currentTime;
+  let nextAt = 0;
 
-  function scheduleChunk(base64Data) {
-    const bytes  = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-    const int16  = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / 32768;
-    }
+  return {
+    play(b64) {
+      const bytes   = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const int16   = new Int16Array(bytes.buffer);
+      const f32     = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
 
-    const buffer = ctx.createBuffer(1, float32.length, sampleRate);
-    buffer.getChannelData(0).set(float32);
+      const buf = ctx.createBuffer(1, f32.length, sampleRate);
+      buf.getChannelData(0).set(f32);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
 
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    const startAt = Math.max(ctx.currentTime + 0.05, nextPlayTime);
-    source.start(startAt);
-    nextPlayTime = startAt + buffer.duration;
-  }
-
-  function resume() {
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-  }
-
-  function reset() {
-    nextPlayTime = ctx.currentTime;
-  }
-
-  function close() {
-    ctx.close().catch(() => {});
-  }
-
-  return { scheduleChunk, resume, reset, close };
+      const start = Math.max(ctx.currentTime + 0.04, nextAt);
+      src.start(start);
+      nextAt = start + buf.duration;
+    },
+    resume() { if (ctx.state === "suspended") ctx.resume().catch(() => {}); },
+    reset()  { nextAt = 0; },
+    close()  { ctx.close().catch(() => {}); },
+  };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ArchivistPCPage = () => {
-  const [userTranscript,   setUserTranscript]   = useState("");
-  const [geminiTranscript, setGeminiTranscript] = useState("");
-  const [statusText,       setStatusText]       = useState("Connecting...");
-  const [connected,        setConnected]        = useState(false);
+  const [userText,    setUserText]    = useState("");
+  const [geminiText,  setGeminiText]  = useState("");
+  const [statusState, setStatusState] = useState("connecting");
+  const [connected,   setConnected]   = useState(false);
 
   const wsRef      = useRef(null);
   const playerRef  = useRef(null);
   const retryRef   = useRef(null);
-  const retryCount = useRef(0);
-  const feedEndRef = useRef(null);
+  const retryN     = useRef(0);
+  const endRef     = useRef(null);
 
   const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= 1) return; // already open/connecting
+    if (wsRef.current?.readyState <= 1) return;
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      retryCount.current = 0;
+      retryN.current = 0;
       setConnected(true);
-      setStatusText("Idle");
-
-      if (!playerRef.current) {
-        playerRef.current = createAudioPlayer(RECEIVE_RATE);
-      }
+      setStatusState("idle");
+      if (!playerRef.current) playerRef.current = makePlayer(RECEIVE_RATE);
       playerRef.current.resume();
     };
 
-    ws.onmessage = (ev) => {
+    ws.onmessage = ({ data }) => {
       let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
+      try { msg = JSON.parse(data); } catch { return; }
 
       if (msg.type === "audio" && msg.data) {
         playerRef.current?.resume();
-        playerRef.current?.scheduleChunk(msg.data);
+        playerRef.current?.play(msg.data);
       }
-
-      if (msg.type === "user_transcript") {
-        setUserTranscript(msg.text || "");
-      }
-
-      if (msg.type === "gemini_transcript") {
-        setGeminiTranscript(msg.text || "");
-        if (msg.final) {
-          // Keep displayed until next turn
-        }
-      }
+      if (msg.type === "user_transcript")   setUserText(msg.text || "");
+      if (msg.type === "gemini_transcript") setGeminiText(msg.text || "");
 
       if (msg.type === "status") {
-        const labels = {
-          connected:     "Idle",
-          idle:          "Idle",
-          user_speaking: "Listening...",
-          processing:    "Processing...",
-          interrupted:   "Interrupted",
-        };
-        setStatusText(labels[msg.state] || msg.state);
-
-        if (msg.state === "idle" || msg.state === "connected") {
-          playerRef.current?.reset();
-        }
+        setStatusState(msg.state || "idle");
+        if (msg.state === "idle" || msg.state === "connected") playerRef.current?.reset();
       }
-
       if (msg.type === "interrupted") {
         playerRef.current?.reset();
-        setStatusText("Interrupted");
+        setStatusState("idle");
       }
     };
 
     ws.onclose = () => {
       setConnected(false);
-      setStatusText("Disconnected — retrying...");
-      const delay = Math.min(1000 * 2 ** retryCount.current, 15000);
-      retryCount.current += 1;
+      setStatusState("connecting");
+      const delay = Math.min(1000 * 2 ** retryN.current, 15000);
+      retryN.current += 1;
       retryRef.current = setTimeout(connect, delay);
     };
 
@@ -139,12 +104,22 @@ const ArchivistPCPage = () => {
   }, [connect]);
 
   useEffect(() => {
-    feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [userTranscript, geminiTranscript]);
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [userText, geminiText]);
 
-  const dotState = statusText.startsWith("Listen") ? "active"
-    : statusText.startsWith("Process") ? "processing"
+  const dotClass =
+    statusState === "user_speaking" ? "active"
+    : statusState === "processing"  ? "processing"
     : "";
+
+  const statusLabel = {
+    connecting:    "Connecting...",
+    connected:     "Idle",
+    idle:          "Idle",
+    user_speaking: "Listening...",
+    processing:    "Processing...",
+    interrupted:   "Interrupted",
+  }[statusState] ?? statusState;
 
   return (
     <div className="archivist-page" onClick={() => playerRef.current?.resume()}>
@@ -152,49 +127,51 @@ const ArchivistPCPage = () => {
         <img src={officialLogo} alt="The First NonCarbon Artist" className="archivist-header__logo" />
         <div className="archivist-header__copy">
           <h1>Archivist</h1>
-          <p>Gemini Live — PC output</p>
+          <p>PC output</p>
         </div>
       </header>
 
-      <div className="archivist-status">
-        <span className={`archivist-status__dot${dotState ? ` ${dotState}` : ""}`} />
-        {statusText}
-        {!connected && (
-          <span style={{ marginLeft: 6, color: "#ff7d7d", fontSize: 11 }}>
-            ● {WS_URL}
-          </span>
-        )}
-      </div>
+      <div className="archivist-pc-body">
+        <div className="archivist-status-bar">
+          <span className={`archivist-status-bar__dot${dotClass ? ` ${dotClass}` : ""}`} />
+          {statusLabel}
+          {!connected && (
+            <span style={{ marginLeft: 6, color: "#6a3030", fontSize: 11 }}>
+              ● {WS_URL}
+            </span>
+          )}
+        </div>
 
-      <div className="archivist-transcript archivist-transcript--pc archivist-pc-content">
-        {!userTranscript && !geminiTranscript && (
-          <p className="archivist-transcript__empty">
-            Waiting for a conversation to start.
+        <div className="archivist-feed">
+          {!userText && !geminiText && (
+            <p className="archivist-feed__empty">
+              {connected ? "Waiting for a conversation to start…" : "Waiting for local server…"}
+            </p>
+          )}
+
+          {userText && (
+            <div className="archivist-feed__line">
+              <span className="archivist-feed__label">User</span>
+              <p className="archivist-feed__text user">{userText}</p>
+            </div>
+          )}
+
+          {geminiText && (
+            <div className="archivist-feed__line">
+              <span className="archivist-feed__label">Vera</span>
+              <p className="archivist-feed__text gemini">{geminiText}</p>
+            </div>
+          )}
+
+          <div ref={endRef} />
+        </div>
+
+        {!connected && (
+          <p className="archivist-pc-hint">
+            Run <code>python server/archivist_server.py</code> on this PC to connect.
           </p>
         )}
-
-        {userTranscript && (
-          <div className="archivist-transcript__line">
-            <span className="archivist-transcript__label">User</span>
-            <p className="archivist-transcript__text user">{userTranscript}</p>
-          </div>
-        )}
-
-        {geminiTranscript && (
-          <div className="archivist-transcript__line">
-            <span className="archivist-transcript__label">Vera</span>
-            <p className="archivist-transcript__text gemini">{geminiTranscript}</p>
-          </div>
-        )}
-
-        <div ref={feedEndRef} />
       </div>
-
-      {!connected && (
-        <p style={{ textAlign: "center", color: "#555", fontSize: 12, marginTop: "auto" }}>
-          Run <code style={{ color: "#888" }}>python server/archivist_server.py</code> on the PC to connect.
-        </p>
-      )}
     </div>
   );
 };

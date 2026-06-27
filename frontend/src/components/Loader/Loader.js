@@ -25,6 +25,7 @@ const Loader = ({
   const [showScanQR, setShowScanQR] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedMode, setSelectedMode] = useState("artist");
 
   const adminSessionRef = useRef(null);
 
@@ -94,7 +95,7 @@ const Loader = ({
     }
     setIsSubmitting(true);
     if (onNicknameSubmitRef.current) {
-      onNicknameSubmitRef.current(trimmed);
+      onNicknameSubmitRef.current(trimmed, selectedMode);
     }
   };
 
@@ -229,11 +230,34 @@ const Loader = ({
             <div className="claim-panel">
               <div className="claim-copy">
                 <h1 className="claim-title">
-                  {isAdminTyped ? "Admin Access" : "Welcome!"}
+                  {isAdminTyped
+                    ? "Admin Access"
+                    : selectedMode === "archivist"
+                    ? "Archivist"
+                    : "Welcome!"}
                 </h1>
               </div>
 
               <form onSubmit={handleClaimSubmit} className="claim-form">
+                {!isAdminTyped && (
+                  <div className="claim-mode-toggle">
+                    <button
+                      type="button"
+                      className={`claim-mode-btn${selectedMode === "artist" ? " active" : ""}`}
+                      onClick={() => setSelectedMode("artist")}
+                    >
+                      Artist
+                    </button>
+                    <button
+                      type="button"
+                      className={`claim-mode-btn${selectedMode === "archivist" ? " active" : ""}`}
+                      onClick={() => setSelectedMode("archivist")}
+                    >
+                      Archivist
+                    </button>
+                  </div>
+                )}
+
                 {/* ── Upper box: nickname input OR locked "ADMIN" display ── */}
                 {isAdminTyped ? (
                   <div className="claim-session-panel">
@@ -289,9 +313,13 @@ const Loader = ({
                   {isSubmitting
                     ? isAdminTyped
                       ? "Connecting..."
+                      : selectedMode === "archivist"
+                      ? "Starting..."
                       : "Joining..."
                     : isAdminTyped
                     ? "Connect"
+                    : selectedMode === "archivist"
+                    ? "Start Conversation"
                     : "Join Session"}
                 </button>
               </form>

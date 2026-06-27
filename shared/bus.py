@@ -16,6 +16,9 @@ class Bus:
     SETTINGS = "settings"
     WEBRTC_OFFER = "webrtc_offer"
     WEBRTC_ANSWER = "webrtc_answer"
+    ARCHIVIST_PTT             = "archivist_ptt"
+    ARCHIVIST_AUDIO           = "archivist_audio"
+    ARCHIVIST_USER_TRANSCRIPT = "archivist_user_transcript"
 
     CHANNELS = (
         SESSION,
@@ -28,6 +31,9 @@ class Bus:
         SETTINGS,
         WEBRTC_OFFER,
         WEBRTC_ANSWER,
+        ARCHIVIST_PTT,
+        ARCHIVIST_AUDIO,
+        ARCHIVIST_USER_TRANSCRIPT,
     )
 
     def __init__(self, host, port, password, ssl):
@@ -237,6 +243,9 @@ class Bus:
                 return await self._call_handler(handler, payload)
 
             elif channel in (self.WEBRTC_OFFER, self.WEBRTC_ANSWER):
+                return await self._call_handler(handler, payload)
+
+            elif channel in (self.ARCHIVIST_PTT, self.ARCHIVIST_AUDIO, self.ARCHIVIST_USER_TRANSCRIPT):
                 return await self._call_handler(handler, payload)
 
         except Exception as e:

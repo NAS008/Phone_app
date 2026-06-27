@@ -1,0 +1,228 @@
+/* ── Shared layout for both phone and PC archivist pages ── */
+
+.archivist-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top, rgba(255,255,255,0.06), transparent 40%),
+    linear-gradient(180deg, #020202 0%, #080808 100%);
+  color: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-sizing: border-box;
+  padding: 14px 14px max(20px, env(safe-area-inset-bottom));
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* ── Header (same as ArtistMode) ── */
+.archivist-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(24,24,24,0.94), rgba(10,10,10,0.96));
+  box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+  flex-shrink: 0;
+}
+
+.archivist-header__logo {
+  display: block;
+  width: 72px;
+  height: auto;
+}
+
+.archivist-header__copy h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.archivist-header__copy p {
+  margin: 3px 0 0;
+  color: #b6b6b6;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ── Transcript area ── */
+.archivist-transcript {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(24,24,24,0.94), rgba(10,10,10,0.96));
+  box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+  border-radius: 20px;
+  padding: 18px 16px;
+  overflow-y: auto;
+}
+
+.archivist-transcript__line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.archivist-transcript__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6e6e6e;
+}
+
+.archivist-transcript__text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #f0f0f0;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.archivist-transcript__text.user {
+  color: #d4d4d4;
+}
+
+.archivist-transcript__text.gemini {
+  color: #fff;
+}
+
+.archivist-transcript__empty {
+  color: #4a4a4a;
+  font-size: 14px;
+  text-align: center;
+  margin: auto;
+}
+
+/* ── Status badge ── */
+.archivist-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px;
+  color: #8a8a8a;
+  flex-shrink: 0;
+  align-self: center;
+  letter-spacing: 0.04em;
+}
+
+.archivist-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3a3a3a;
+  flex-shrink: 0;
+}
+
+.archivist-status__dot.active {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,0.6);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.archivist-status__dot.processing {
+  background: #888;
+  animation: pulse-dot 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.45; transform: scale(0.75); }
+}
+
+/* ── PTT button (phone page) ── */
+.archivist-ptt-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 6px;
+  flex-shrink: 0;
+}
+
+.archivist-ptt-btn {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18);
+  background: linear-gradient(145deg, rgba(40,40,40,0.9), rgba(15,15,15,0.95));
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.75);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.archivist-ptt-btn:hover {
+  border-color: rgba(255,255,255,0.3);
+}
+
+.archivist-ptt-btn.active {
+  border-color: rgba(255,255,255,0.7);
+  background: linear-gradient(145deg, rgba(60,60,60,0.95), rgba(30,30,30,0.98));
+  box-shadow: 0 0 0 6px rgba(255,255,255,0.08), 0 8px 32px rgba(0,0,0,0.5);
+  color: #fff;
+  transform: scale(0.96);
+}
+
+.archivist-ptt-btn.blocked {
+  border-color: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.2);
+  cursor: not-allowed;
+}
+
+.archivist-ptt-label {
+  font-size: 12px;
+  color: #6e6e6e;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* ── Notice toast (phone page) ── */
+.archivist-notice {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 50;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(28,28,28,0.94);
+  backdrop-filter: blur(12px);
+  font-size: 13px;
+  color: #fafafa;
+  white-space: nowrap;
+}
+
+/* ── PC page specifics ── */
+.archivist-pc-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.archivist-transcript--pc {
+  gap: 20px;
+}

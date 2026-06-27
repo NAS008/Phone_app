@@ -1,9 +1,12 @@
 import "./App.css";
 import { Loader } from "./components";
 import { QRCodePage } from "./pages";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { useLocation } from "react-router-dom";
 import messageBusService from "./services/messageBusService";
+
+const ArchivistPhonePage = lazy(() => import("./pages/ArchivistPage/ArchivistPhonePage"));
+const ArchivistPCPage    = lazy(() => import("./pages/ArchivistPage/ArchivistPCPage"));
 
 function App() {
   const location = useLocation();
@@ -23,6 +26,7 @@ function App() {
 
   // null = not joined yet; adminNickname or any string = joined
   const [nickname, setNickname] = useState(null);
+  const [appMode, setAppMode] = useState("artist"); // "artist" | "archivist"
   // For ADMIN: the session they typed in (overrides urlSessionId)
   const [adminSessionId, setAdminSessionId] = useState(null);
 
@@ -30,11 +34,14 @@ function App() {
   const sessionId = isAdmin ? (adminSessionId || "") : urlSessionId;
 
   // Called by Loader when a normal user submits their nickname
-  const handleNicknameSubmit = (submittedNickname) => {
+  const handleNicknameSubmit = (submittedNickname, mode = "artist") => {
     setNickname(submittedNickname);
-    messageBusService
-      .sendUserJoined(urlSessionId, submittedNickname)
-      .catch((err) => console.warn("user_joined publish failed:", err));
+    setAppMode(mode);
+    if (mode === "artist") {
+      messageBusService
+        .sendUserJoined(urlSessionId, submittedNickname)
+        .catch((err) => console.warn("user_joined publish failed:", err));
+    }
   };
 
   // Called by Loader when ADMIN submits their session ID — jumps straight to main app
@@ -45,6 +52,15 @@ function App() {
       .sendUserJoined(sid, adminNickname)
       .catch((err) => console.warn("user_joined publish failed:", err));
   };
+
+  // ── /archivist — PC browser page (no login needed) ───────────────────────
+  if (location.pathname === "/archivist") {
+    return (
+      <Suspense fallback={null}>
+        <ArchivistPCPage />
+      </Suspense>
+    );
+  }
 
   // ── Entry page ────────────────────────────────────────────────────────────
   if (!nickname) {
@@ -60,7 +76,16 @@ function App() {
     );
   }
 
-  // ── Main app ──────────────────────────────────────────────────────────────
+  // ── Archivist phone page ──────────────────────────────────────────────────
+  if (appMode === "archivist") {
+    return (
+      <Suspense fallback={null}>
+        <ArchivistPhonePage nickname={nickname} />
+      </Suspense>
+    );
+  }
+
+  // ── Main artist app ───────────────────────────────────────────────────────
   return (
     <div className="app-container">
       <QRCodePage nickname={nickname} sessionId={sessionId} isAdmin={isAdmin} />

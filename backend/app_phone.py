@@ -191,6 +191,20 @@ class SettingsStore:
         with self._lock:
             return dict(self._state)
 
+class ArchivistStore:
+    """Stores recent archivist user-transcript deltas for phone polling."""
+    def __init__(self, maxlen=200):
+        self._items = deque(maxlen=maxlen)
+        self._lock = threading.Lock()
+
+    def add(self, entry: dict):
+        with self._lock:
+            self._items.appendleft(entry)
+
+    def get_after(self, after_ms: int):
+        with self._lock:
+            return [t for t in self._items if t.get("ts", 0) > after_ms]
+
 class WebRtcSignalStore:
     """Holds pending WebRTC offers until the PC publishes the matching answer on the bus."""
 
@@ -257,9 +271,9 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
 
         if parsed.path == "/api/ai_messages":
-            params = urllib.parse.parse_qs(parsed.query)
             session_id = params.get("sessionId", [None])[0]
             limit = int(params.get("limit", [20])[0])
             after_ms = int(params.get("after", [0])[0])
@@ -310,6 +324,12 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/health":
             self.send_json({"success": True, "status": "ok"})
+            return
+
+        if parsed.path == "/api/archivist/transcripts":
+            after_ms = int(params.get("after", [0])[0])
+            transcripts = self.server.archivist_store.get_after(after_ms)
+            self.send_json({"success": True, "transcripts": transcripts})
             return
 
         if parsed.path == "/api/debug":
@@ -378,6 +398,14 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/publish/webrtc_offer":
                 self.handle_webrtc_offer(payload)
+                return
+
+            if parsed.path == "/api/archivist/ptt":
+                self.handle_archivist_ptt(payload)
+                return
+
+            if parsed.path == "/api/archivist/audio":
+                self.handle_archivist_audio(payload)
                 return
 
             self.send_json({"success": False, "error": "Not found"}, status=404)
@@ -543,17 +571,35 @@ class MessageBusRequestHandler(BaseHTTPRequestHandler):
                 "error": "Transcription failed. Please try again.",
             }, status=500)
 
+    def handle_archivist_ptt(self, payload):
+        self.server.bus._publish(Bus.ARCHIVIST_PTT, {
+            "action": payload.get("action"),
+            "nickname": payload.get("nickname", ""),
+            "session_id": str(payload.get("session_id") or ""),
+        })
+        self.send_json({"success": True})
+
+    def handle_archivist_audio(self, payload):
+        self.server.bus._publish(Bus.ARCHIVIST_AUDIO, {
+            "nickname": payload.get("nickname", ""),
+            "session_id": str(payload.get("session_id") or ""),
+            "audio_bytes": payload.get("audio_bytes"),
+            "sample_rate": payload.get("sample_rate", 16000),
+        })
+        self.send_json({"success": True})
+
     def log_message(self, format, *args):
         return
 
 class AIMessageListener(threading.Thread):
-    def __init__(self, config, store, gif_store, settings_store, webrtc_signal):
+    def __init__(self, config, store, gif_store, settings_store, webrtc_signal, archivist_store=None):
         super().__init__(daemon=True)
         self.config = config
         self.store = store
         self.gif_store = gif_store
         self.settings_store = settings_store
         self.webrtc_signal = webrtc_signal
+        self.archivist_store = archivist_store
         self.stopped = threading.Event()
 
     def run(self):
@@ -571,7 +617,10 @@ class AIMessageListener(threading.Thread):
                     decode_responses=False,
                 )
                 pubsub = client.pubsub(ignore_subscribe_messages=True)
-                pubsub.subscribe(Bus.AI_MESSAGE_TO_PHONE, Bus.SETTINGS, Bus.WEBRTC_ANSWER)
+                pubsub.subscribe(
+                    Bus.AI_MESSAGE_TO_PHONE, Bus.SETTINGS, Bus.WEBRTC_ANSWER,
+                    Bus.ARCHIVIST_USER_TRANSCRIPT,
+                )
                 print("✓ Phone listener: subscribed, waiting for messages...")
 
                 while not self.stopped.is_set():
@@ -596,6 +645,11 @@ class AIMessageListener(threading.Thread):
 
                     if channel == Bus.WEBRTC_ANSWER:
                         self.webrtc_signal.resolve(payload.get("offer_id"), payload)
+                        continue
+
+                    if channel == Bus.ARCHIVIST_USER_TRANSCRIPT:
+                        if self.archivist_store is not None:
+                            self.archivist_store.add(payload)
                         continue
 
                     parts = payload.get("parts", [])
@@ -697,7 +751,10 @@ def run_backend(host="0.0.0.0", port=None):
     gif_store = GifStore()
     settings_store = SettingsStore()
     webrtc_signal = WebRtcSignalStore()
-    listener = AIMessageListener(config, message_store, gif_store, settings_store, webrtc_signal)
+    archivist_store = ArchivistStore()
+    listener = AIMessageListener(
+        config, message_store, gif_store, settings_store, webrtc_signal, archivist_store
+    )
     listener.start()
 
     try:
@@ -723,6 +780,7 @@ def run_backend(host="0.0.0.0", port=None):
     server.settings_store = settings_store
     server.webrtc_signal = webrtc_signal
     server.audio_processor = audio_processor
+    server.archivist_store = archivist_store
 
     print(f"✓ Backend bus server running on http://{host}:{port}")
 

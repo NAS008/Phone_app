@@ -300,6 +300,38 @@
   word-break: break-word;
 }
 
+.claim-mode-toggle {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.claim-mode-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.claim-mode-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.claim-mode-btn:hover:not(.active) {
+  color: rgba(255, 255, 255, 0.72);
+}
+
 .claim-scan-msg {
   color: #a8a8a8;
   font-size: 14px;

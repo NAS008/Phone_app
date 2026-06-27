@@ -9,7 +9,7 @@ class Config:
     APP_NAME = "ARTIST"
     INPUT_FOLDER  = r"../../input"
     OUTPUT_FOLDER  = r"../../output"
-    WINDOW_W, WINDOW_H = 1920, 1080#1024, 1024#1152, 2048#512, 512#1080, 1080#2160, 2160
+    WINDOW_W, WINDOW_H = 1920, 1080#1024, 1024#2048, 2028#2048, 2048#1024, 1024#1152, 2048#512, 512#2160, 2160
     FPS = 10
     VIDEO_SECONDS = 10 # rolling frame buffer depth for USER_VIDEO gif
 
@@ -19,7 +19,7 @@ class Config:
     IMAGE_W = (WINDOW_W // 4) // 16 * 16
     IMAGE_H = (WINDOW_H // 4) // 16 * 16
     GRID_SIZE = 128
-    PIXELS_PER_CELL = max(IMAGE_W, IMAGE_H) // GRID_SIZE
+    PIXELS_PER_CELL = 2#max(IMAGE_W, IMAGE_H) // GRID_SIZE
     aspect = WINDOW_W / WINDOW_H
     if aspect >= 1.0:
         GX = GRID_SIZE
@@ -60,8 +60,8 @@ class Config:
 
     # Stable Diffusion
     SD_MODEL = r"C:\Users\NAS\Models\stable-diffusion-3.5-medium"
-    SD_INFERENCE_STEPS = 12
-    SD_GUIDANCE_SCALE = 3.5
+    SD_INFERENCE_STEPS = 10
+    SD_GUIDANCE_SCALE = 3.0
     SD_SEED = 80367253
 
     # AnimateDiff
@@ -116,8 +116,18 @@ class Config:
         #"rusty toaster on the beach",
     ]
 
-    # Optical flow
-    OF_FRAMES = 5
+    # Frame interpolation (temporal smoothing between SD keyframes)
+    OF_FRAMES = 7
+    # "rife" = Practical-RIFE (fastest); "film" = Google FILM (better rotation,
+    # scaling, large translation); "amt" = AMT (sharper than RIFE on large motion,
+    # lighter than FILM). FILM needs film_net_fp16.pt from
+    # dajes/frame-interpolation-pytorch dropped into MODELS_FOLDER.
+    VFI_MODEL = "film"
+    # AMT (used when VFI_MODEL="amt"): needs the MCG-NKU/AMT repo checked out (for
+    # its `networks` package + cfgs/) and the matching checkpoint
+    # (amt-s.pth / amt-l.pth / amt-g.pth) in MODELS_FOLDER.
+    AMT_REPO  = r"..\..\models\AMT"
+    AMT_MODEL = "amt-s"
 
     # SuperResolution
     MODELS_FOLDER  = r"../../models"
@@ -132,6 +142,52 @@ class Config:
     FP_GUIDANCE_SCALE   = 9.0
     FP_TRUE_CFG_SCALE   = 3.5
     FP_INFERENCE_STEPS  = 6       # 5-8 is enough; resolution is the quality limit at small sizes
+
+    # Wan2.2 FLF2V-14B (first-last-frame-to-video: true interpolation between two stills)
+    # TI2V-5B accepts last_image but wasn't trained on it — video drifts from the target.
+    # FLF2V-14B was trained on first/last pairs so it reliably lands on the last frame.
+    WAN_MODEL            = "Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers"
+    WAN_SIZE             = 480     # 480px; 720p needs ~3× more VRAM than 480p
+    WAN_INFERENCE_STEPS  = 30      # FLF2V needs 30-50 for coherent intermediate frames
+    WAN_GUIDANCE_SCALE   = 5.5
+    WAN_NUM_FRAMES       = 33      # must be 4k+1 (Wan temporal factor 4); ~2s at 16fps
+    WAN_FPS              = 16
+    WAN_SEED             = 42
+    # int8 quantization (bitsandbytes) shrinks the 14B transformer from ~28 GB
+    # bfloat16 to ~16 GB with near-lossless quality, ending the shared-memory
+    # spill that throttled full-residency bf16 on 32 GB. None = full bf16.
+    WAN_QUANTIZE         = "8bit"  # "8bit" | None
+    # Quantized pipelines can't take .to("cuda") (bnb places the transformer
+    # itself), so the Wan loader always uses cpu-offload when quantized — which
+    # still keeps the transformer GPU-resident across the whole denoising loop.
+    WAN_OFFLOAD          = False
+
+    # Wan2.2 TI2V-5B — single-image I2V (no first/last pair). Drives the dog
+    # head-turn via the WanI2V class. Unlike FLF2V it has no CLIP image encoder
+    # and conditions on the input frame's VAE latent, so one image + a motion
+    # prompt is its native mode. At ~5B (~10 GB bf16) it fits full GPU residency
+    # on 32 GB, so QUANTIZE=None (bf16) is faster than int8 here.
+    WANI2V_MODEL            = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+    WANI2V_SIZE             = 704
+    WANI2V_INFERENCE_STEPS  = 30      # 30-50; TI2V-5B is coherent from ~30
+    WANI2V_GUIDANCE_SCALE   = 5.0     # TI2V-5B's recommended range
+    WANI2V_NUM_FRAMES       = 33      # 4k+1; ~1.4s at 24fps
+    WANI2V_FPS              = 24      # TI2V-5B is trained at 24fps
+    WANI2V_SEED             = 42
+    WANI2V_QUANTIZE         = None    # bf16 full residency (5B fits 32 GB easily)
+    WANI2V_OFFLOAD          = False
+
+    # LTX-Video (Lightricks) — fast I2V: ~2B params, much lighter than Wan.
+    # Animates from the first frame only (no FLF2V). Great for quick iteration.
+    LTX_MODEL           = "Lightricks/LTX-Video"
+    LTX_WIDTH           = 512
+    LTX_HEIGHT          = 512
+    LTX_NUM_FRAMES      = 49      # (n-1)%8==0; 25 = ~1s clip at 24fps
+    LTX_INFERENCE_STEPS = 25
+    LTX_GUIDANCE_SCALE  = 3.0
+    LTX_FPS             = 24
+    LTX_SEED            = 42
+    LTX_OFFLOAD         = False
 
     STYLE = {
         "None": {
@@ -443,8 +499,27 @@ class Config:
     PHONE_BACKEND_URL = __import__('os').environ.get('PHONE_BACKEND_URL', 'https://phoneapp-production-48e4.up.railway.app')
 
 
+    # LIVE CONFIG
+    # -----------------------------------------------------------------------------
+    # Gemini Live API (voice conversation via PC mic + speakers)
+    LIVE_VERTEX_LOCATION = _os.environ.get("VERTEX_LOCATION", "us-central1")
+    LIVE_MODEL           = "gemini-live-2.5-flash-native-audio"
+
+    LIVE_CHANNELS     = 1
+    LIVE_SEND_RATE    = 16000   # Microfone → Gemini: 16 kHz
+    LIVE_RECEIVE_RATE = 24000   # Gemini → colunas: 24 kHz
+    LIVE_CHUNK        = 1024
+    LIVE_MIC_DEVICE_INDEX     = None
+    LIVE_SPEAKER_DEVICE_INDEX = None
+    LIVE_PTT_KEY = "space"      # PUSH-TO-TALK (carrega para falar)
+
+    LIVE_BANDPASS_LOW_HZ  = 200   # corta rumor/zumbido grave (DC, 50/60 Hz, passos, vento)
+    LIVE_BANDPASS_HIGH_HZ = 3800  # corta hiss/sibilância aguda acima da fala (banda telefónica)
+    LIVE_BANDPASS_ORDER   = 4
+
+
     # UI CONFIG
-    # -----------------------------------------------------------------------------    
+    # -----------------------------------------------------------------------------
     UI_POSE_MODEL = r"..\..\models\pose_landmarker_lite.task"
     UI_CHANNELS = ["mouse", "cam", "mic"]
     UI_CHANNEL = UI_CHANNELS[2]

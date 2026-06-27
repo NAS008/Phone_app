@@ -1,5 +1,6 @@
 import json
 import re
+import math
 import cv2
 import time
 import hashlib
@@ -422,7 +423,41 @@ class Gemini:
         if not main or not support:
             raise ValueError(f"Gemini returned incomplete subjects: main={len(main)} support={len(support)}")
         return {"main": main[:count], "support": support[:count]}
-   
+
+    def generate_motion(self, main_subject: str, support_subject: str) -> str:
+        """Author a short image-to-video motion prompt (for Wan) describing how
+        to ANIMATE a generated still in place. The scene is a MAIN subject at the
+        bottom, suspended by thin ropes from an inflated SUPPORT subject above.
+
+        The clip should show the MAIN subject's own natural locomotion (a
+        four-legged animal kicking/paddling its legs, a fish or whale undulating
+        its fins and tail, a bird beating its wings, a flower swaying) while the
+        SUPPORT subject drifts slowly upward and the taut ropes lift the MAIN
+        subject gently up after it. The camera stays static."""
+        prompt = (
+            "You write a short motion description for an image-to-video model (Wan).\n"
+            "The still shows a MAIN subject at the bottom of the frame, suspended by thin "
+            "ropes from an inflated SUPPORT subject pressed against the top.\n"
+            f"MAIN SUBJECT: {main_subject}\n"
+            f"SUPPORT SUBJECT: {support_subject}\n\n"
+            "Describe ONLY the motion in a 5-second clip, in 2-3 plain sentences:\n"
+            "- The MAIN subject performs its own natural locomotion in place — pick what fits "
+            "the creature (legs walking/paddling, fins and tail undulating, wings beating, "
+            "petals and stems swaying).\n"
+            "- The SUPPORT subject slowly rises and floats upward; the thin ropes pull taut and "
+            "lift the MAIN subject gently upward with it.\n"
+            "- The camera is static; motion is smooth, continuous and subtle.\n\n"
+            "Output only the motion description — no preamble, no list, no quotes."
+        )
+        response = self.client.models.generate_content(
+            model=self.TEXT_MODEL,
+            contents=[prompt],
+        )
+        text = self._extract_text(response)
+        if not text:
+            raise ValueError("Gemini returned no motion prompt")
+        return text.strip()
+
 class StableDiffusion:
     def __init__(self, SD_MODEL, IW, IH, INFERENCE_STEPS=12, GUIDANCE_SCALE=3.5, SEED=80367253):
 
@@ -822,6 +857,526 @@ class FramePack:
             )
         return [self._pil_to_bgr(f) for f in result.frames[0]]
 
+class Wan:
+    """Wan2.2 TI2V-5B image-to-video / first-last-frame-to-video.
+
+    Animates a single still (I2V) driven by a text motion prompt, or morphs
+    between two stills (FLF2V) when a last frame is supplied. BGR numpy in/out
+    to match the rest of ai.py (StableDiffusion, FramePack, FILM, OpticalFlow).
+
+    The model needs height/width on a fixed grid (vae spatial factor × patch
+    size); arbitrary input sizes are snapped down to the nearest valid multiple,
+    so callers can hand in whatever resolution their pipeline uses."""
+
+    NEGATIVE = ("blurry, low quality, distorted, deformed, extra limbs, "
+                "duplicate face, text, watermark, jpeg artifacts, flickering")
+
+    def __init__(self, MODEL_ID="Wan-AI/Wan2.2-TI2V-5B-Diffusers", SIZE=512,
+                 INFERENCE_STEPS=25, GUIDANCE_SCALE=5.5, NUM_FRAMES=17,
+                 FPS=24, SEED=42, negative=None, OFFLOAD=True, QUANTIZE=None):
+        from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+        from huggingface_hub import snapshot_download
+
+        self.SIZE = SIZE
+        self.INFERENCE_STEPS = INFERENCE_STEPS
+        self.GUIDANCE_SCALE = GUIDANCE_SCALE
+        self.NUM_FRAMES = NUM_FRAMES
+        self.FPS = FPS
+        self.SEED = SEED
+        if negative is not None:
+            self.NEGATIVE = negative
+        self.DEVICE = "cuda"
+        self.quantized = bool(QUANTIZE)
+
+        print(f"Loading {MODEL_ID}...")
+        local_dir = snapshot_download(MODEL_ID)
+        vae = AutoencoderKLWan.from_pretrained(
+            local_dir, subfolder="vae", torch_dtype=torch.float32
+        )
+
+        # int8-quantize the 14B transformer (the only component large enough to
+        # matter: ~28 GB bf16 → ~16 GB int8). VAE/text/image encoders stay full
+        # precision — they're small and quality-critical. bitsandbytes places the
+        # quantized weights on GPU itself, so the pipeline must NOT be .to("cuda")'d
+        # later; the cpu-offload path below handles every component correctly.
+        transformer = None
+        if self.quantized:
+            from diffusers import BitsAndBytesConfig, WanTransformer3DModel
+            qcfg = BitsAndBytesConfig(load_in_8bit=True)
+            transformer = WanTransformer3DModel.from_pretrained(
+                local_dir, subfolder="transformer",
+                quantization_config=qcfg, torch_dtype=torch.bfloat16,
+            )
+            print("✓ Wan: transformer quantized to int8 (bitsandbytes)")
+
+        # FLF2V-14B needs CLIPVisionModel (not CLIPVisionModelWithProjection).
+        # Loading it explicitly prevents the pipeline from auto-loading the wrong
+        # variant, which silently breaks last_image conditioning.
+        extra = {"transformer": transformer} if transformer is not None else {}
+        try:
+            from transformers import CLIPVisionModel
+            image_encoder = CLIPVisionModel.from_pretrained(
+                local_dir, subfolder="image_encoder", torch_dtype=torch.float32
+            )
+            self.pipe = WanImageToVideoPipeline.from_pretrained(
+                local_dir, vae=vae, image_encoder=image_encoder,
+                torch_dtype=torch.bfloat16, low_cpu_mem_usage=True, **extra,
+            )
+            print("✓ Wan: CLIPVisionModel image encoder loaded")
+        except Exception as _e:
+            print(f"• Wan: image_encoder subfolder not found ({_e}), using pipeline default")
+            self.pipe = WanImageToVideoPipeline.from_pretrained(
+                local_dir, vae=vae, torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True, **extra,
+            )
+        # Keep Wan's ~10 GB of weights OUT of VRAM while idle. It only fires
+        # occasionally (on 'a'), whereas SD + upscale + interpolate run
+        # continuously and need the VRAM. On Windows the driver silently spills
+        # overflow into shared system memory instead of raising OutOfMemoryError,
+        # so a "successful" .to("cuda") can still thrash the whole pipeline to a
+        # crawl — hence offload is the default, with full residency opt-in.
+        if self.quantized:
+            # bnb already pinned the int8 transformer to GPU; .to("cuda") on the
+            # whole pipe would raise. cpu-offload moves the other components and
+            # keeps the transformer resident across the denoising loop (it only
+            # offloads between distinct components), so denoising runs full-speed.
+            self.pipe.enable_model_cpu_offload()
+            print("✓ Wan: model CPU offload (int8 transformer GPU-resident)")
+        elif OFFLOAD:
+            self.pipe.enable_model_cpu_offload()
+            print("✓ Wan: model CPU offload (weights stream to GPU on demand)")
+        else:
+            try:
+                self.pipe.to(self.DEVICE)
+                print("✓ Wan: full GPU residency")
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                self.pipe.enable_model_cpu_offload()
+                print("✓ Wan: model CPU offload (OOM fallback)")
+
+        try:
+            self.pipe.transformer.set_attention_backend("sage")
+            print("✓ Wan: attention backend SageAttention")
+        except Exception:
+            print("• Wan: attention backend default SDPA")
+
+        # TaylorSeer: replaces TeaCache in diffusers ≥0.33 — predicts transformer
+        # activations via Taylor series, skipping full compute on cached steps (~1.5–2×).
+        try:
+            from diffusers import TaylorSeerCacheConfig
+            self.pipe.transformer.enable_cache(TaylorSeerCacheConfig())
+            print("✓ Wan: TaylorSeer cache enabled")
+        except Exception:
+            print("• Wan: activation cache not available")
+
+        self.pipe.vae.enable_slicing()   # decode temporal frames one at a time
+        self.pipe.vae.enable_tiling()    # decode spatial dims in tiles — essential at ≥704px
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        # torch.compile fuses CUDA kernels — 1.5–2× faster after first-run compilation.
+        # First call takes ~5 min to compile; subsequent calls use the cache.
+        # Skip it on the int8 transformer: bnb's Linear8bitLt graph-breaks under
+        # compile and the int8 matmul kernels are already fused.
+        if self.quantized:
+            print("• Wan: torch.compile skipped (int8 transformer)")
+        else:
+            try:
+                self.pipe.transformer = torch.compile(
+                    self.pipe.transformer, mode="default", fullgraph=False
+                )
+                print("✓ Wan: torch.compile enabled (first run compiles ~2 min)")
+            except Exception as _e:
+                print(f"• Wan: torch.compile skipped ({_e})")
+
+        # Frames must be sized on this grid; snap any request down to it.
+        self._mod = self.pipe.vae_scale_factor_spatial * self.pipe.transformer.config.patch_size[1]
+        self.size = SIZE // self._mod * self._mod
+        if self.size != SIZE:
+            print(f"⚠ Wan: WAN_SIZE={SIZE} snapped to {self.size} (grid={self._mod}px)")
+        print(f"✓ Wan ready | grid {self._mod}px, default {self.size}×{self.size}")
+
+    def _snap(self, value):
+        return max(self._mod, int(value) // self._mod * self._mod)
+
+    def _bgr_to_pil(self, bgr, w, h):
+        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).resize(
+            (w, h), Image.LANCZOS
+        )
+
+    def _pil_to_bgr(self, pil):
+        return cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+    def generate(self, image_bgr, prompt="", last_image_bgr=None,
+                 num_frames=None, width=None, height=None, seed=None):
+        """Animate image_bgr with a text motion prompt. Pass last_image_bgr to
+        morph toward a second still (FLF2V). Returns a list of BGR frames.
+        Width/height default to the configured SIZE (not the input image size),
+        so large Gemini images are automatically downscaled to the safe range."""
+        num_frames = self.NUM_FRAMES if num_frames is None else num_frames
+        seed = self.SEED if seed is None else seed
+        w = self._snap(width  if width  is not None else self.size)
+        h = self._snap(height if height is not None else self.size)
+
+        mode = "FLF2V" if last_image_bgr is not None else "I2V"
+        print(f"• Wan [{mode}]: {w}×{h} | {num_frames}f | {self.INFERENCE_STEPS} steps | seed={seed}")
+
+        first = self._bgr_to_pil(image_bgr, w, h)
+        kwargs = dict(
+            image=first, prompt=prompt, negative_prompt=self.NEGATIVE,
+            height=h, width=w, num_frames=num_frames,
+            num_inference_steps=self.INFERENCE_STEPS,
+            guidance_scale=self.GUIDANCE_SCALE, output_type="pil",
+            generator=torch.Generator(self.DEVICE).manual_seed(seed),
+        )
+        if last_image_bgr is not None:
+            kwargs["last_image"] = self._bgr_to_pil(last_image_bgr, w, h)
+
+        t0 = time.perf_counter()
+        try:
+            with torch.inference_mode():
+                result = self.pipe(**kwargs)
+            frames = result.frames[0]
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            print(f"✗ Wan: OOM at {w}×{h} × {num_frames}f — try reducing WAN_SIZE or WAN_NUM_FRAMES")
+            return []
+        except Exception as e:
+            print(f"✗ Wan: pipeline error: {e}")
+            return []
+
+        dt = time.perf_counter() - t0
+        print(f"✓ Wan: {len(frames)} frames in {dt:.1f}s ({len(frames)/dt:.1f} fps) @ {w}×{h}")
+        return [self._pil_to_bgr(f) for f in frames]
+
+class WanI2V:
+    """Wan2.2 TI2V-5B image-to-video: a single still + a text prompt drive the
+    motion. Kept SEPARATE from `Wan` (FLF2V-14B) so the morph/first-last path is
+    untouched — the two models are architecturally different:
+
+      * FLF2V-14B (`Wan`)  — CLIP image encoder, needs a first AND last frame
+        (514 image tokens); feeding one frame reshapes wrong and crashes.
+      * TI2V-5B   (`WanI2V`) — NO image encoder (transformer.config.image_dim is
+        null). The pipeline VAE-encodes the input frame and concatenates the
+        latent (expand_timesteps), so single-image prompt-driven I2V is native.
+
+    At ~5B (~10 GB bf16) the whole model fits on 32 GB with room to spare, so the
+    default is full GPU residency at bf16 — faster than int8 here (int8 adds a
+    per-matmul fp16 cast and would only help if VRAM were tight). QUANTIZE="8bit"
+    stays available for smaller cards. BGR numpy in/out, like the rest of ai.py."""
+
+    NEGATIVE = ("blurry, low quality, distorted, deformed, extra limbs, "
+                "duplicate face, text, watermark, jpeg artifacts, flickering")
+
+    def __init__(self, MODEL_ID="Wan-AI/Wan2.2-TI2V-5B-Diffusers", SIZE=480,
+                 INFERENCE_STEPS=30, GUIDANCE_SCALE=5.0, NUM_FRAMES=33,
+                 FPS=24, SEED=42, negative=None, OFFLOAD=False, QUANTIZE=None):
+        from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+        from huggingface_hub import snapshot_download
+
+        self.SIZE = SIZE
+        self.INFERENCE_STEPS = INFERENCE_STEPS
+        self.GUIDANCE_SCALE = GUIDANCE_SCALE
+        self.NUM_FRAMES = NUM_FRAMES
+        self.FPS = FPS
+        self.SEED = SEED
+        if negative is not None:
+            self.NEGATIVE = negative
+        self.DEVICE = "cuda"
+        self.quantized = bool(QUANTIZE)
+
+        print(f"Loading {MODEL_ID} (I2V)...")
+        local_dir = snapshot_download(MODEL_ID)
+        vae = AutoencoderKLWan.from_pretrained(
+            local_dir, subfolder="vae", torch_dtype=torch.float32
+        )
+
+        # No image_encoder for TI2V-5B — the pipeline conditions via VAE-latent
+        # concat, guarded internally by transformer.config.image_dim (null here),
+        # so we deliberately don't load CLIP. Optional int8 only if requested.
+        transformer = None
+        if self.quantized:
+            from diffusers import BitsAndBytesConfig, WanTransformer3DModel
+            qcfg = BitsAndBytesConfig(load_in_8bit=True)
+            transformer = WanTransformer3DModel.from_pretrained(
+                local_dir, subfolder="transformer",
+                quantization_config=qcfg, torch_dtype=torch.bfloat16,
+            )
+            print("✓ WanI2V: transformer quantized to int8 (bitsandbytes)")
+        extra = {"transformer": transformer} if transformer is not None else {}
+
+        self.pipe = WanImageToVideoPipeline.from_pretrained(
+            local_dir, vae=vae, torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True, **extra,
+        )
+        print("✓ WanI2V: pipeline loaded (latent-concat I2V, no CLIP encoder)")
+
+        if self.quantized:
+            self.pipe.enable_model_cpu_offload()
+            print("✓ WanI2V: model CPU offload (int8 transformer GPU-resident)")
+        elif OFFLOAD:
+            self.pipe.enable_model_cpu_offload()
+            print("✓ WanI2V: model CPU offload (weights stream to GPU on demand)")
+        else:
+            try:
+                self.pipe.to(self.DEVICE)
+                print("✓ WanI2V: full GPU residency (bf16)")
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                self.pipe.enable_model_cpu_offload()
+                print("✓ WanI2V: model CPU offload (OOM fallback)")
+
+        try:
+            self.pipe.transformer.set_attention_backend("sage")
+            print("✓ WanI2V: attention backend SageAttention")
+        except Exception:
+            print("• WanI2V: attention backend default SDPA")
+
+        try:
+            from diffusers import TaylorSeerCacheConfig
+            self.pipe.transformer.enable_cache(TaylorSeerCacheConfig())
+            print("✓ WanI2V: TaylorSeer cache enabled")
+        except Exception:
+            print("• WanI2V: activation cache not available")
+
+        self.pipe.vae.enable_slicing()
+        self.pipe.vae.enable_tiling()
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        if self.quantized:
+            print("• WanI2V: torch.compile skipped (int8 transformer)")
+        else:
+            try:
+                self.pipe.transformer = torch.compile(
+                    self.pipe.transformer, mode="default", fullgraph=False
+                )
+                print("✓ WanI2V: torch.compile enabled (first run compiles ~2 min)")
+            except Exception as _e:
+                print(f"• WanI2V: torch.compile skipped ({_e})")
+
+        self._mod = self.pipe.vae_scale_factor_spatial * self.pipe.transformer.config.patch_size[1]
+        self.size = SIZE // self._mod * self._mod
+        if self.size != SIZE:
+            print(f"⚠ WanI2V: SIZE={SIZE} snapped to {self.size} (grid={self._mod}px)")
+        print(f"✓ WanI2V ready | grid {self._mod}px, default {self.size}×{self.size}")
+
+    def _snap(self, value):
+        return max(self._mod, int(value) // self._mod * self._mod)
+
+    def _bgr_to_pil(self, bgr, w, h):
+        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).resize(
+            (w, h), Image.LANCZOS
+        )
+
+    def _pil_to_bgr(self, pil):
+        return cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+    def generate(self, image_bgr, prompt="", num_frames=None,
+                 width=None, height=None, seed=None):
+        """Animate image_bgr with a text motion prompt (single-image I2V — no
+        last frame). Returns a list of BGR frames. Width/height default to the
+        configured SIZE so large Gemini images are downscaled to the safe range."""
+        num_frames = self.NUM_FRAMES if num_frames is None else num_frames
+        seed = self.SEED if seed is None else seed
+        w = self._snap(width  if width  is not None else self.size)
+        h = self._snap(height if height is not None else self.size)
+
+        print(f"• WanI2V: {w}×{h} | {num_frames}f | {self.INFERENCE_STEPS} steps | seed={seed}")
+        first = self._bgr_to_pil(image_bgr, w, h)
+        kwargs = dict(
+            image=first, prompt=prompt, negative_prompt=self.NEGATIVE,
+            height=h, width=w, num_frames=num_frames,
+            num_inference_steps=self.INFERENCE_STEPS,
+            guidance_scale=self.GUIDANCE_SCALE, output_type="pil",
+            generator=torch.Generator(self.DEVICE).manual_seed(seed),
+        )
+
+        t0 = time.perf_counter()
+        try:
+            with torch.inference_mode():
+                result = self.pipe(**kwargs)
+            frames = result.frames[0]
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            print(f"✗ WanI2V: OOM at {w}×{h} × {num_frames}f — reduce SIZE or NUM_FRAMES")
+            return []
+        except Exception as e:
+            print(f"✗ WanI2V: pipeline error: {e}")
+            return []
+
+        dt = time.perf_counter() - t0
+        print(f"✓ WanI2V: {len(frames)} frames in {dt:.1f}s ({len(frames)/dt:.1f} fps) @ {w}×{h}")
+        return [self._pil_to_bgr(f) for f in frames]
+
+class FILM:
+    """Google FILM (Frame Interpolation for Large Motion) — drop-in replacement
+    for OpticalFlow/RIFE exposing the same .interpolate(a, b, steps) contract.
+
+    Unlike RIFE, which warps pixels along a single estimated flow field (and so
+    smears or ghosts under rotation, scaling and large translation), FILM predicts
+    a shared multi-scale feature pyramid and *synthesizes* the in-between frame,
+    including disoccluded regions. This makes affine-style motion between two SD
+    keyframes (turning, zooming, sliding) look far cleaner. Note: like all frame
+    interpolators it only fills BETWEEN two fixed endpoints — it cannot invent new
+    content (e.g. grow hair); that remains the SD journey's job.
+
+    Uses the TorchScript export from dajes/frame-interpolation-pytorch:
+        https://github.com/dajes/frame-interpolation-pytorch/releases
+    Drop `film_net_fp16.pt` (or `film_net_fp32.pt`) into MODELS_FOLDER. The scripted
+    model's forward is model(img0, img1, dt): images are [B,3,H,W] in [0,1], dt is
+    [B,1]; it returns the frame at time dt (trained on the interior, best near 0.5).
+    """
+    ALIGN = 64  # FILM's feature pyramid needs H,W divisible by 2^(levels)
+
+    def __init__(self, folder, half=True, model_name=None):
+        self.DEVICE = "cuda"
+        self.half = bool(half) and torch.cuda.is_available()
+        self.dtype = torch.float16 if self.half else torch.float32
+        name = model_name or ("film_net_fp16.pt" if self.half else "film_net_fp32.pt")
+        self.model = torch.jit.load(f"{folder}/{name}", map_location=self.DEVICE)
+        self.model.eval().to(self.DEVICE)
+        print(f"✓ [ai] FILM frame interpolation ready | {name}")
+
+    def _to_tensor(self, bgr):
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        t = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32) / 255.0)
+        return t.unsqueeze(0).to(self.DEVICE, dtype=self.dtype)
+
+    def _from_tensor(self, t, h, w):
+        arr = t[0, :, :h, :w].float().clamp(0, 1).mul(255.0).byte().cpu().numpy()
+        return cv2.cvtColor(arr.transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+
+    def interpolate(self, frame1_bgr, frame2_bgr, steps):
+        img0 = self._to_tensor(frame1_bgr)
+        img1 = self._to_tensor(frame2_bgr)
+
+        _, _, h, w = img0.shape
+        ph = ((h - 1) // self.ALIGN + 1) * self.ALIGN
+        pw = ((w - 1) // self.ALIGN + 1) * self.ALIGN
+        padding = (0, pw - w, 0, ph - h)
+        img0 = torch.nn.functional.pad(img0, padding)
+        img1 = torch.nn.functional.pad(img1, padding)
+
+        # FILM is trained for the MIDPOINT (t=0.5). Arbitrary-t calls are unreliable:
+        # the interior frames barely move and never span the full start→end motion, so
+        # most of the journey goes "missing" and the keyframe snaps in at the end. The
+        # correct usage is RECURSIVE MIDPOINT BISECTION — every call asks only for
+        # t=0.5 (FILM's strong regime), which yields 2^depth-1 frames uniformly spaced
+        # in time that cover the whole journey. We then arc-length resample to `steps`
+        # constant-velocity frames, with the true endpoint as the last (the caller no
+        # longer appends it).
+        def _mid(x0, x1):
+            dt = x0.new_full((x0.shape[0], 1), 0.5)
+            out = self.model(x0, x1, dt)
+            if isinstance(out, dict):  # some exports return {'image': tensor, ...}
+                out = out.get("image", next(iter(out.values())))
+            return out
+
+        def _bisect(x0, x1, depth):
+            if depth == 0:
+                return []
+            m = _mid(x0, x1)
+            return _bisect(x0, m, depth - 1) + [m] + _bisect(m, x1, depth - 1)
+
+        depth = max(1, math.ceil(math.log2(steps + 1)))
+        with torch.no_grad():
+            ladder = [img0] + _bisect(img0, img1, depth) + [img1]
+
+            # FILM eases in/out, so equal TIME steps are not equal MOTION steps and the
+            # transition visibly slows at each keyframe. Resample to constant velocity
+            # by walking equal ARC-LENGTH increments (arc length = cumulative mean-abs
+            # pixel change). We snap to the nearest ladder frame (no cross-fade) so
+            # FILM's sharpness is preserved.
+            cum = [0.0]
+            for i in range(len(ladder) - 1):
+                cum.append(cum[-1] + (ladder[i + 1] - ladder[i]).abs().mean().item())
+            total = cum[-1] or 1.0
+
+            out = []
+            for k in range(1, steps + 1):
+                target = total * k / steps          # k=steps -> total -> exact endpoint
+                j = min(range(len(cum)), key=lambda i: abs(cum[i] - target))
+                out.append(self._from_tensor(ladder[j], h, w))
+        return out
+
+class AMT:
+    """AMT (All-Pairs Multi-Field Transforms for Efficient Frame Interpolation,
+    CVPR 2023) — drop-in interpolator exposing the same .interpolate(a, b, steps)
+    contract as FILM and OpticalFlow(RIFE).
+
+    AMT builds an all-pairs correlation volume and jointly refines bidirectional
+    multi-field flows + occlusion, giving sharper results than RIFE under large
+    motion while staying far lighter than FILM. Like every VFI model it only fills
+    BETWEEN two fixed endpoints — it cannot synthesize new content. It supports
+    arbitrary in-between time t, so we use the same interior-t scheme as FILM.
+
+    Needs the official repo (MCG-NKU/AMT) checked out so its `networks` package and
+    `cfgs/` are importable (set AMT_REPO), plus the matching checkpoint
+    (amt-s.pth / amt-l.pth / amt-g.pth) in MODELS_FOLDER (set AMT_MODEL). The network
+    hyperparameters are read straight from the repo's cfg YAML so they always match
+    the checkpoint.
+    """
+    DIVISOR = 16  # AMT's correlation pyramid needs H,W divisible by 16
+
+    def __init__(self, folder, repo, model_name="amt-s", scale_factor=1.0, half=False):
+        import sys, importlib
+        if repo not in sys.path:
+            sys.path.insert(0, repo)
+        from omegaconf import OmegaConf
+
+        self.DEVICE = "cuda"
+        # AMT's correlation runs fp32 in the reference demo; keep fp16 opt-in.
+        self.half = bool(half) and torch.cuda.is_available()
+        self.dtype = torch.float16 if self.half else torch.float32
+        self.scale_factor = scale_factor
+
+        cfg = OmegaConf.load(f"{repo}/cfgs/{model_name.upper()}.yaml")
+        net = cfg.network
+        module_path, cls_name = net.name.rsplit(".", 1)
+        cls = getattr(importlib.import_module(module_path), cls_name)
+        params = OmegaConf.to_container(net.params, resolve=True) if "params" in net else {}
+        self.model = cls(**params)
+
+        ckpt = torch.load(f"{folder}/{model_name}.pth", map_location="cpu", weights_only=False)
+        self.model.load_state_dict(ckpt.get("state_dict", ckpt))
+        self.model = self.model.to(self.DEVICE).eval()
+        if self.half:
+            self.model = self.model.half()
+        print(f"✓ [ai] AMT frame interpolation ready | {model_name}")
+
+    def _to_tensor(self, bgr):
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        t = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32) / 255.0)
+        return t.unsqueeze(0).to(self.DEVICE, dtype=self.dtype)
+
+    def _from_tensor(self, t, h, w):
+        arr = t[0, :, :h, :w].float().clamp(0, 1).mul(255.0).byte().cpu().numpy()
+        return cv2.cvtColor(arr.transpose(1, 2, 0), cv2.COLOR_RGB2BGR)
+
+    def interpolate(self, frame1_bgr, frame2_bgr, steps):
+        img0 = self._to_tensor(frame1_bgr)
+        img1 = self._to_tensor(frame2_bgr)
+
+        _, _, h, w = img0.shape
+        ph = ((h - 1) // self.DIVISOR + 1) * self.DIVISOR
+        pw = ((w - 1) // self.DIVISOR + 1) * self.DIVISOR
+        padding = (0, pw - w, 0, ph - h)
+        img0 = torch.nn.functional.pad(img0, padding)
+        img1 = torch.nn.functional.pad(img1, padding)
+
+        flow = []
+        with torch.no_grad():
+            for i in range(1, steps + 1):
+                # Times i/steps so the LAST frame is t=1.0 (the endpoint), matching
+                # RIFE/FILM. The caller no longer appends the raw SD keyframe, so the
+                # transition stays uniformly spaced with no sharp keyframe "snap".
+                t = i / steps
+                embt = torch.tensor(t, dtype=self.dtype, device=self.DEVICE).view(1, 1, 1, 1)
+                pred = self.model(img0, img1, embt, scale_factor=self.scale_factor, eval=True)["imgt_pred"]
+                flow.append(self._from_tensor(pred, h, w))
+        return flow
+
 class OpticalFlow:
     def __init__(self):
         import sys
@@ -866,3 +1421,100 @@ class OpticalFlow:
             frame_np = (batch[i].transpose(1, 2, 0) * 255).clip(0, 255).astype(np.uint8)
             flow.append(cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR))
         return flow
+
+class LTXVideo:
+    """LTX-Video (Lightricks/LTX-Video) image-to-video — ~2B params, much faster
+    than Wan. Exposes generate(image_bgr, prompt, ...) matching the Wan interface
+    so it can be swapped in wherever Wan is used. BGR numpy in/out.
+
+    Constraints:
+      - Width/height must be multiples of 32
+      - num_frames must satisfy (N-1) % 8 == 0 (e.g. 9, 17, 25, 33)
+    LTX-Video I2V animates FROM the first frame only; last_image_bgr is accepted
+    for interface compatibility but not used."""
+
+    NEGATIVE = ("low quality, worst quality, deformed, distorted, disfigured, "
+                "motion smear, motion artifacts, fused fingers, bad anatomy, "
+                "ugly, watermark, text")
+
+    def __init__(self, MODEL_ID="Lightricks/LTX-Video", WIDTH=768, HEIGHT=512,
+                 INFERENCE_STEPS=25, GUIDANCE_SCALE=3.0, NUM_FRAMES=25,
+                 FPS=24, SEED=42, OFFLOAD=False, negative=None):
+        from diffusers import LTXImageToVideoPipeline
+
+        self.INFERENCE_STEPS = INFERENCE_STEPS
+        self.GUIDANCE_SCALE  = GUIDANCE_SCALE
+        self.FPS  = FPS
+        self.SEED = SEED
+        if negative is not None:
+            self.NEGATIVE = negative
+        self.DEVICE = "cuda"
+
+        print("Loading LTX-Video...")
+        self.pipe = LTXImageToVideoPipeline.from_pretrained(
+            MODEL_ID, torch_dtype=torch.bfloat16
+        )
+        if OFFLOAD:
+            self.pipe.enable_model_cpu_offload()
+            print("✓ LTX-Video: model CPU offload")
+        else:
+            try:
+                self.pipe.to(self.DEVICE)
+                print("✓ LTX-Video: full GPU residency")
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                self.pipe.enable_model_cpu_offload()
+                print("✓ LTX-Video: model CPU offload (OOM fallback)")
+        self.pipe.vae.enable_slicing()
+
+        self.width      = max(32, int(WIDTH)  // 32 * 32)
+        self.height     = max(32, int(HEIGHT) // 32 * 32)
+        nf = int(NUM_FRAMES)
+        self.num_frames = nf if (nf - 1) % 8 == 0 else (nf // 8) * 8 + 1
+        print(f"✓ LTX-Video ready | {self.width}×{self.height} {self.num_frames} frames")
+
+    def _snap_spatial(self, v):
+        return max(32, int(v) // 32 * 32)
+
+    def _snap_temporal(self, n):
+        n = int(n)
+        return n if (n - 1) % 8 == 0 else (n // 8) * 8 + 1
+
+    def _bgr_to_pil(self, bgr, w, h):
+        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).resize(
+            (w, h), Image.LANCZOS
+        )
+
+    def _pil_to_bgr(self, pil):
+        return cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+    def generate(self, image_bgr, prompt="", last_image_bgr=None,
+                 num_frames=None, width=None, height=None, seed=None):
+        """Animate image_bgr with a text prompt. last_image_bgr is ignored —
+        LTX-Video I2V conditions on the first frame only. Returns BGR frames."""
+        w  = self._snap_spatial(width  or self.width)
+        h  = self._snap_spatial(height or self.height)
+        nf = self._snap_temporal(num_frames or self.num_frames)
+        seed = self.SEED if seed is None else seed
+        if last_image_bgr is not None:
+            print("• LTX-Video: last_image_bgr ignored (no FLF2V support)")
+
+        first = self._bgr_to_pil(image_bgr, w, h)
+
+        t0 = time.perf_counter()
+        with torch.inference_mode():
+            result = self.pipe(
+                image=first,
+                prompt=prompt,
+                negative_prompt=self.NEGATIVE,
+                width=w, height=h,
+                num_frames=nf,
+                num_inference_steps=self.INFERENCE_STEPS,
+                guidance_scale=self.GUIDANCE_SCALE,
+                output_type="pil",
+                generator=torch.Generator(self.DEVICE).manual_seed(seed),
+            )
+        frames = result.frames[0]
+        dt = time.perf_counter() - t0
+        print(f"✓ LTX-Video: {len(frames)} frames in {dt:.1f}s ({len(frames)/dt:.1f} fps) @ {w}×{h} seed={seed}")
+        return [self._pil_to_bgr(f) for f in frames]
